@@ -5,35 +5,33 @@ import networkx as nx
 import random
 
 # Mapa de la ciudad 24x24
-# Caracteres: 'v'=Sur, '^'=Norte, '>'=Este, '<'=Oeste, '#'=Edificio, 'S'=Semáforo, 'D'=Destino
-# TODO: Rellenar con el mapa completo de Gotham según el PDF
-city_map = [
-    "########################",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#>>S>>>D>>S>>>D>>S>>>D>",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#<<S<<<#<<S<<<#<<S<<<<#",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#>>S>>>D>>S>>>D>>S>>>D>",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#<<S<<<#<<S<<<#<<S<<<<#",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "#>>S>>>D>>S>>>D>>S>>>D>",
-    "#  v   #  ^   #  v   # ",
-    "#  v   #  ^   #  v   # ",
-    "########################",
-]
 
+city_map = [
+    "v<<<<<<<<<<<S<<<<<<<<<<<", 
+    "v<<<<<<<<<<<S<<<<<<<<<<^", 
+    "vv##vv##vvSS########D#^^",
+    "SS#Dvv##vv^^#D########^^",  
+    "vvS<<<<<vv^^>>>>>>>>>>S^",  
+    "vvS<<<<<vv^^>>>>>>>>>>S^", 
+    "vv##^^##vv^^#######D##SS", 
+    "SS##^^##vv^^##########^^", 
+    "vvS<<<<<<<<<<<<<<<<<<<^^",
+    "vvS<<<<<v##^>>>>>>>>>>^^",
+    "vv>>>>>>v##^>>>>>>>>>S^^",
+    "vv>>>>>>>>>>>>>>>>>>>S^^", 
+    "vv#D^^##vv^^####vv####SS", 
+    "vv##^^##vv^^####vv####^^", 
+    "vv##^^##vv^^##D#vv####^^",
+    "vv##^^D#vv^^<<<<vv###D^^",
+    "vv>>>>>>vv^^<<<<vv####^^",
+    "vv>>>>>>vv^^####vv####^^",
+    "vv####D#vv^^D###vv####^^",
+    "vv######vv^^####vvD###^^",
+    "vv######vv^^####vv####^^",
+    "vv##D###SS^^##D#SS####^^",
+    "vv>>>>>>S>>>>>>S>>>>>>^^",
+    ">>>>>>>>S>>>>>>S>>>>>>^^"   
+]
 
 class Car(Agent):
     """Agente que representa un vehículo en la simulación."""
