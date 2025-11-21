@@ -1,5 +1,4 @@
 from mesa import Model, Agent
-from mesa.time import RandomActivation
 from mesa.space import MultiGrid
 import networkx as nx
 import random
@@ -36,8 +35,8 @@ city_map = [
 class Car(Agent):
     """Agente que representa un vehículo en la simulación."""
     
-    def __init__(self, unique_id, model, destination=None):
-        super().__init__(unique_id, model)
+    def __init__(self, model, destination=None):
+        super().__init__(model)
         self.destination = destination  # Coordenada (x, y) del destino
         self.path = []  # Lista de coordenadas para seguir
         
@@ -57,7 +56,7 @@ class Car(Agent):
                 # Si llegamos al destino, remover el coche
                 if self.pos == self.destination:
                     self.model.grid.remove_agent(self)
-                    self.model.schedule.remove(self)
+                    self.remove()
     
     def calculate_path(self):
         """Calcula el camino más corto usando A* en el grafo de NetworkX."""
@@ -96,8 +95,8 @@ class Car(Agent):
 class TrafficLight(Agent):
     """Agente que representa un semáforo con 3 estados: Green, Yellow, Red."""
     
-    def __init__(self, unique_id, model, direction="NS"):
-        super().__init__(unique_id, model)
+    def __init__(self, model, direction="NS"):
+        super().__init__(model)
         self.state = "Green"  # Estados: "Green", "Yellow", "Red"
         self.timer = 10  # Tiempo en cada estado
         self.direction = direction  # "NS" (Norte-Sur) o "EW" (Este-Oeste)
@@ -127,8 +126,8 @@ class TrafficLight(Agent):
 class Obstacle(Agent):
     """Agente que representa un edificio u obstáculo estático."""
     
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
+    def __init__(self, model):
+        super().__init__(model)
     
     def step(self):
         """Los obstáculos no tienen lógica de paso."""
@@ -138,8 +137,8 @@ class Obstacle(Agent):
 class Destination(Agent):
     """Agente que representa un destino/estacionamiento."""
     
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
+    def __init__(self, model):
+        super().__init__(model)
     
     def step(self):
         """Los destinos no tienen lógica de paso."""
@@ -152,8 +151,6 @@ class CityModel(Model):
     def __init__(self, width=24, height=24):
         super().__init__()
         self.grid = MultiGrid(width, height, torus=False)
-        self.schedule = RandomActivation(self)
-        self.current_id = 0
         
         # Grafo dirigido para navegación
         self.G = nx.DiGraph()
@@ -179,24 +176,21 @@ class CityModel(Model):
                 
                 if cell == '#':
                     # Crear obstáculo
-                    obstacle = Obstacle(self.next_id(), self)
+                    obstacle = Obstacle(self)
                     self.grid.place_agent(obstacle, (x, y))
-                    # No agregar obstáculos al scheduler
                     
                 elif cell == 'S':
                     # Crear semáforo - determinar dirección según contexto
                     # Por simplicidad, alternar entre NS y EW
                     direction = "NS" if (row + col) % 2 == 0 else "EW"
-                    traffic_light = TrafficLight(self.next_id(), self, direction)
+                    traffic_light = TrafficLight(self, direction)
                     self.grid.place_agent(traffic_light, (x, y))
-                    self.schedule.add(traffic_light)
                     
                 elif cell == 'D':
                     # Crear destino
-                    destination = Destination(self.next_id(), self)
+                    destination = Destination(self)
                     self.grid.place_agent(destination, (x, y))
                     self.destinations.append((x, y))
-                    # No agregar destinos al scheduler
     
     def setup_graph(self):
         """Crea un grafo dirigido de NetworkX con las calles."""
@@ -248,9 +242,8 @@ class CityModel(Model):
             # Elegir destino aleatorio
             destination = random.choice(self.destinations)
         
-        car = Car(self.next_id(), self, destination)
+        car = Car(self, destination)
         self.grid.place_agent(car, start_pos)
-        self.schedule.add(car)
         return car
     
     def get_random_spawn_point(self):
@@ -266,14 +259,9 @@ class CityModel(Model):
         
         return random.choice(valid_positions) if valid_positions else (1, 1)
     
-    def next_id(self):
-        """Genera un ID único para un agente."""
-        self.current_id += 1
-        return self.current_id
-    
     def step(self):
         """Ejecuta un paso de la simulación."""
-        self.schedule.step()
+        self.agents.shuffle_do("step")
     
     def serialize_grid(self):
         """Serializa el grid para Unity con información detallada."""
