@@ -94,10 +94,10 @@ async def handler(ws):
         connected.remove(ws)
 async def main():
     async with websockets.serve(handler, WS_HOST, WS_PORT):
-        print(f"🚀 Servidor Mesa corriendo en ws://{WS_HOST}:{WS_PORT}")
-        print(f"📊 Modelo inicializado: {MODEL_WIDTH}x{MODEL_HEIGHT}")
-        print(f"🔗 Grafo: {len(model.G.nodes)} nodos, {len(model.G.edges)} aristas")
-        print(f"🅿️  Destinos: {len(model.destinations)}")
+        print(f"Servidor Mesa corriendo en ws://{WS_HOST}:{WS_PORT}")
+        print(f"Modelo inicializado: {MODEL_WIDTH}x{MODEL_HEIGHT}")
+        print(f"Grafo: {len(model.G.nodes)} nodos, {len(model.G.edges)} aristas")
+        print(f"Destinos: {len(model.destinations)}")
         print("Esperando conexión de Unity...")
         await asyncio.Future()  # run forever
 if __name__ == "__main__":

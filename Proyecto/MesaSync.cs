@@ -44,7 +44,7 @@ public class MesaSync : MonoBehaviour
         };
         websocket.OnClose += (e) =>
         {
-            Debug.Log("🔌 WebSocket closed.");
+            Debug.Log(" WebSocket closed.");
         };
         await websocket.Connect();
     }
