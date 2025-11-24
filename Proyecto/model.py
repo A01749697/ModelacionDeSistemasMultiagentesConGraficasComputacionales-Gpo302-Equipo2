@@ -3,7 +3,7 @@ from mesa.space import MultiGrid
 import networkx as nx
 import random
 
-# Mapa de la ciudad 24x24
+# Ciudad Mapeada 24x24 (Racoon City)
 
 city_map = [
     "v<<<<<<<<<<<S<<<<<<<<<<<", 
