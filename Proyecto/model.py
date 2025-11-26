@@ -148,7 +148,7 @@ class Destination(Agent):
 class CityModel(Model):
     """Modelo de la ciudad con tráfico urbano."""
     
-    def __init__(self, width=24, height=24):
+    def __init__(self, pre_spawn=0, width=24, height=24):
         super().__init__()
         self.grid = MultiGrid(width, height, torus=False)
         
@@ -163,6 +163,9 @@ class CityModel(Model):
         
         # Crear el grafo de navegación
         self.setup_graph()
+        
+        for _ in range(pre_spawn):
+            self.spawn_car()
     
     def setup_map(self):
         """Lee city_map y coloca los agentes correspondientes en la grilla."""
@@ -289,5 +292,3 @@ class CityModel(Model):
         return data
     
     
-if __name__ == "__main__":
-    ...
