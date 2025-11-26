@@ -1,6 +1,6 @@
 # visualization.py
-from mesa.visualization.ModularVisualization import ModularServer #type: ignore
-from mesa.visualization.modules import CanvasGrid, TextElement #type: ignore
+from mesa.visualization.ModularVisualization import ModularServer  # type: ignore
+from mesa.visualization.modules import CanvasGrid, TextElement  # type: ignore
 from model import CityModel, Car, TrafficLight, Obstacle, Destination
 import threading
 import time
@@ -27,7 +27,8 @@ def all_cars_arrived(model):
                 return False
     return True
 
-# Portrayal (visual) de agentes en la cuadrícula
+
+# Portrayal visual
 def agent_portrayal(agent):
     if agent is None:
         return None
@@ -35,7 +36,6 @@ def agent_portrayal(agent):
     t = type(agent).__name__
 
     if t == "Car":
-        char = "A"  # Cambia por "C" o "🚗" si quieres emoji
         return {
             "Shape": "rect",
             "w": 0.8,
@@ -43,7 +43,7 @@ def agent_portrayal(agent):
             "Filled": "true",
             "Color": "blue" if not getattr(agent, "arrived", False) else "gray",
             "Layer": 3,
-            "text": char,
+            "text": "A",
             "text_color": "white"
         }
 
@@ -71,8 +71,6 @@ def agent_portrayal(agent):
         }
 
     if t == "Destination":
-        parking = getattr(agent, "parking_number", None)
-        p_text = str(parking) if parking is not None else ""
         return {
             "Shape": "rect",
             "w": 0.8,
@@ -80,31 +78,36 @@ def agent_portrayal(agent):
             "Filled": "true",
             "Color": "purple",
             "Layer": 1,
-            "text": p_text,
+            "text": str(getattr(agent, "parking_number", "")),
             "text_color": "white"
         }
 
     return None
 
+
 # Grid y server
 GRID_SIZE = 24
 grid = CanvasGrid(agent_portrayal, GRID_SIZE, GRID_SIZE, 600, 600)
 car_info = CarInfoText()
-server = ModularServer(CityModel, [grid, car_info], "CityModel Visualizer", {})
 
-# -------- Opciones útiles (activa según necesites) --------
-# 1) Pre-spawn: genera N coches antes de abrir la UI
-PRE_SPAWN = 5  # poner 0 para desactivar
-if PRE_SPAWN:
-    for _ in range(PRE_SPAWN):
-        server.model.spawn_car()
+# ------------- INTEGRACIÓN CORRECTA DE PRE-SPAWN -------------
+PRE_SPAWN = 5  # número de coches iniciales
 
-# 2) Auto-run en hilo: avanza automáticamente hasta que todos lleguen
-AUTO_RUN = False  # cambia a True si quieres que corra automáticamente
-STEP_INTERVAL = 0.2  # segundos entre pasos durante el auto-run
+server = ModularServer(
+    CityModel,
+    [grid, car_info],
+    "CityModel Visualizer",
+    {"pre_spawn": PRE_SPAWN}   # <-- se pasa aquí al modelo
+)
+# -------------------------------------------------------------
+
+
+# Opcional: correr automáticamente
+AUTO_RUN = False
+STEP_INTERVAL = 0.2
 
 def _auto_runner():
-    time.sleep(1.0)  # esperar que server inicie
+    time.sleep(1.0)
     m = server.model
     while not all_cars_arrived(m):
         m.step()
@@ -112,9 +115,8 @@ def _auto_runner():
     print("Auto-run: todos los coches llegaron.")
 
 if AUTO_RUN:
-    t = threading.Thread(target=_auto_runner, daemon=True)
-    t.start()
-# ---------------------------------------------------------
+    threading.Thread(target=_auto_runner, daemon=True).start()
+
 
 if __name__ == "__main__":
     server.launch()
