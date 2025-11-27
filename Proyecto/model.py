@@ -167,7 +167,7 @@ class Destination(Agent):
 class CityModel(Model):
     """Modelo de la ciudad con tráfico urbano."""
     
-    def __init__(self, width=24, height=24):
+    def __init__(self, pre_spawn=0, width=24, height=24):
         super().__init__()
         self.grid = MultiGrid(width, height, torus=True)  # TOROIDAL
         self.schedule = RandomActivation(self)
@@ -389,5 +389,3 @@ class CityModel(Model):
         return data
     
     
-if __name__ == "__main__":
-    ...

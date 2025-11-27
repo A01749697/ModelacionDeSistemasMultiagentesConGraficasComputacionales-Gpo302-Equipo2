@@ -5,11 +5,24 @@ PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
       propertyPath: m_RootOrder
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 15
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
       propertyPath: m_LocalPosition.x
@@ -56,6 +69,24 @@ PrefabInstance:
       value: Car_06
       objectReference: {fileID: 0}
     m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects:
+    - targetCorrespondingSourceObject: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 277528710073203870}
+    - targetCorrespondingSourceObject: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1394808959403943640}
+    - targetCorrespondingSourceObject: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 6409369433923071410}
+    - targetCorrespondingSourceObject: {fileID: -8679921383154817045, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 5057152338812945341}
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 5172178888427994505}
   m_SourcePrefab: {fileID: 100100000, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
 --- !u!1 &52932905164622209 stripped
 GameObject:
@@ -70,9 +101,17 @@ MeshCollider:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 52932905164622209}
   m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
   m_IsTrigger: 0
+  m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 4
+  serializedVersion: 5
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 9001293460107514281, guid: a33ce5f236905db4e975e1283aafc172, type: 3}
@@ -86,6 +125,7 @@ PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 862402628078015291}
     m_Modifications:
     - target: {fileID: 7439417107929141270, guid: 220ceddc72e5e86449f4b8159010e2c1, type: 3}
@@ -137,12 +177,21 @@ PrefabInstance:
       value: Car_06_Wheel_Rear_Right
       objectReference: {fileID: 0}
     m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 220ceddc72e5e86449f4b8159010e2c1, type: 3}
+--- !u!4 &5057152338812945341 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 7439417107929141270, guid: 220ceddc72e5e86449f4b8159010e2c1, type: 3}
+  m_PrefabInstance: {fileID: 2382548461165728683}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &5483156759795470500
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 862402628078015291}
     m_Modifications:
     - target: {fileID: 1507212253389077782, guid: b7e45d2cbe5fdf940889f06b8bee61ad, type: 3}
@@ -194,12 +243,21 @@ PrefabInstance:
       value: Car_06_Wheel_Rear_Left
       objectReference: {fileID: 0}
     m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: b7e45d2cbe5fdf940889f06b8bee61ad, type: 3}
+--- !u!4 &6409369433923071410 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 1507212253389077782, guid: b7e45d2cbe5fdf940889f06b8bee61ad, type: 3}
+  m_PrefabInstance: {fileID: 5483156759795470500}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &6051185930009398671
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 862402628078015291}
     m_Modifications:
     - target: {fileID: 4657138528797371223, guid: 501cd8ab70a88714c8670cec8fb7f09c, type: 3}
@@ -251,12 +309,21 @@ PrefabInstance:
       value: Car_06_Wheel_Front_Right
       objectReference: {fileID: 0}
     m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 501cd8ab70a88714c8670cec8fb7f09c, type: 3}
+--- !u!4 &1394808959403943640 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 4657138528797371223, guid: 501cd8ab70a88714c8670cec8fb7f09c, type: 3}
+  m_PrefabInstance: {fileID: 6051185930009398671}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &8010479746539744446
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 862402628078015291}
     m_Modifications:
     - target: {fileID: 7473964013700024986, guid: 59e3340b20809524eaf42521077e16a7, type: 3}
@@ -308,4 +375,12 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 59e3340b20809524eaf42521077e16a7, type: 3}
+--- !u!4 &277528710073203870 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 7850629602464813088, guid: 59e3340b20809524eaf42521077e16a7, type: 3}
+  m_PrefabInstance: {fileID: 8010479746539744446}
+  m_PrefabAsset: {fileID: 0}
