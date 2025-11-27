@@ -1,5 +1,6 @@
 from mesa import Model, Agent
 from mesa.space import MultiGrid
+from mesa.time import RandomActivation
 import networkx as nx
 import random
 
@@ -28,35 +29,41 @@ city_map = [
     "vv######vv^^####vvD###^^",
     "vv######vv^^####vv####^^",
     "vv##D###SS^^##D#SS####^^",
-    "vv>>>>>>S>>>>>>S>>>>>>^^",
-    ">>>>>>>>S>>>>>>S>>>>>>^^"   
+    "vv>>>>>S>>>>>>>S>>>>>>^^",
+    ">>>>>>>S>>>>>>>S>>>>>>^^"   
 ]
 
 class Car(Agent):
     """Agente que representa un vehículo en la simulación."""
     
-    def __init__(self, model, destination=None):
-        super().__init__(model)
+    def __init__(self, unique_id, model, destination=None):
+        super().__init__(unique_id, model)
         self.destination = destination  # Coordenada (x, y) del destino
         self.path = []  # Lista de coordenadas para seguir
+        self.parking_time = 0  # Contador para tiempo en estacionamiento
         
     def step(self):
         """Ejecuta un paso de movimiento del vehículo."""
+        # Si estamos en el destino, quedarse quieto indefinidamente
+        if self.pos == self.destination:
+            self.parking_time += 1
+            if self.parking_time == 1:  # Solo imprimir una vez
+                print(f"Car {self.unique_id} llegó a {self.destination}")
+            return
+        
+        # Si no tenemos ruta, calcularla
         if not self.path and self.destination:
-            # Calcular path usando A* si aún no tenemos uno
             self.calculate_path()
         
+        # Intentar moverse
         if self.path:
             next_pos = self.path[0]
-            # Verificar si la siguiente celda está libre o tiene semáforo
-            if self.can_move_to(next_pos):
+            can_move = self.can_move_to(next_pos)
+            
+            if can_move:
                 self.model.grid.move_agent(self, next_pos)
                 self.path.pop(0)
-                
-                # Si llegamos al destino, remover el coche
-                if self.pos == self.destination:
-                    self.model.grid.remove_agent(self)
-                    self.remove()
+            # Si no puede moverse, simplemente espera al siguiente turno
     
     def calculate_path(self):
         """Calcula el camino más corto usando A* en el grafo de NetworkX."""
@@ -65,6 +72,8 @@ class Car(Agent):
                 self.path = nx.shortest_path(self.model.G, self.pos, self.destination)
                 self.path.pop(0)  # Remover posición actual
             except nx.NetworkXNoPath:
+                # No hay ruta posible - quedarse quieto y reportar
+                print(f"Car {self.unique_id} atascado en {self.pos} sin ruta a {self.destination}")
                 self.path = []
     
     def can_move_to(self, pos):
@@ -76,18 +85,28 @@ class Car(Agent):
             if isinstance(agent, Car):
                 return False
             
-            # Verificar semáforo
+            # Lógica estricta de semáforos
             if isinstance(agent, TrafficLight):
-                # Determinar dirección del movimiento
+                if agent.state == "Green":
+                    return True
+                
+                # Lógica corregida para detectar movimiento en Toroide
                 dx = pos[0] - self.pos[0]
                 dy = pos[1] - self.pos[1]
                 
-                # Si el coche se mueve en NS (dy != 0) y el semáforo controla NS
-                if dy != 0 and agent.direction == "NS":
-                    return agent.state == "Green"
-                # Si el coche se mueve en EW (dx != 0) y el semáforo controla EW
-                elif dx != 0 and agent.direction == "EW":
-                    return agent.state == "Green"
+                # Detectar eje de movimiento real
+                moving_vertically = (dy != 0)
+                moving_horizontally = (dx != 0)
+                
+                # Reglas estrictas:
+                # NS traffic light: Block if trying to cross vertically (Red/Yellow)
+                if agent.direction == "NS" and moving_vertically:
+                    return False
+                # EW traffic light: Block if trying to cross horizontally (Red/Yellow)
+                elif agent.direction == "EW" and moving_horizontally:
+                    return False
+                
+                return False # Por defecto esperar en rojo
         
         return True
 
@@ -95,8 +114,8 @@ class Car(Agent):
 class TrafficLight(Agent):
     """Agente que representa un semáforo con 3 estados: Green, Yellow, Red."""
     
-    def __init__(self, model, direction="NS"):
-        super().__init__(model)
+    def __init__(self, unique_id, model, direction="NS"):
+        super().__init__(unique_id, model)
         self.state = "Green"  # Estados: "Green", "Yellow", "Red"
         self.timer = 10  # Tiempo en cada estado
         self.direction = direction  # "NS" (Norte-Sur) o "EW" (Este-Oeste)
@@ -126,8 +145,8 @@ class TrafficLight(Agent):
 class Obstacle(Agent):
     """Agente que representa un edificio u obstáculo estático."""
     
-    def __init__(self, model):
-        super().__init__(model)
+    def __init__(self, unique_id, model):
+        super().__init__(unique_id, model)
     
     def step(self):
         """Los obstáculos no tienen lógica de paso."""
@@ -137,8 +156,8 @@ class Obstacle(Agent):
 class Destination(Agent):
     """Agente que representa un destino/estacionamiento."""
     
-    def __init__(self, model):
-        super().__init__(model)
+    def __init__(self, unique_id, model):
+        super().__init__(unique_id, model)
     
     def step(self):
         """Los destinos no tienen lógica de paso."""
@@ -150,19 +169,31 @@ class CityModel(Model):
     
     def __init__(self, width=24, height=24):
         super().__init__()
-        self.grid = MultiGrid(width, height, torus=False)
+        self.grid = MultiGrid(width, height, torus=True)  # TOROIDAL
+        self.schedule = RandomActivation(self)
         
         # Grafo dirigido para navegación
         self.G = nx.DiGraph()
         
         # Listas para trackear agentes
         self.destinations = []
+        self.occupied_destinations = set()  # Track de estacionamientos ocupados
+        
+        # Timer para prevenir teletransportación
+        self.spawn_timer = 0
         
         # Inicializar el mapa
         self.setup_map()
         
         # Crear el grafo de navegación
         self.setup_graph()
+        
+        self.running = True # Required for Mesa visualization
+        
+        # Spawn inicial - 13 carros únicos
+        while len([a for a in self.schedule.agents if isinstance(a, Car)]) < 13:
+            if not self.spawn_car():
+                break # Parar si no hay espacio o destinos
     
     def setup_map(self):
         """Lee city_map y coloca los agentes correspondientes en la grilla."""
@@ -176,74 +207,143 @@ class CityModel(Model):
                 
                 if cell == '#':
                     # Crear obstáculo
-                    obstacle = Obstacle(self)
+                    obstacle = Obstacle(self.next_id(), self)
                     self.grid.place_agent(obstacle, (x, y))
+                    self.schedule.add(obstacle)
                     
                 elif cell == 'S':
                     # Crear semáforo - determinar dirección según contexto
                     # Por simplicidad, alternar entre NS y EW
                     direction = "NS" if (row + col) % 2 == 0 else "EW"
-                    traffic_light = TrafficLight(self, direction)
+                    traffic_light = TrafficLight(self.next_id(), self, direction)
                     self.grid.place_agent(traffic_light, (x, y))
+                    self.schedule.add(traffic_light)
                     
                 elif cell == 'D':
                     # Crear destino
-                    destination = Destination(self)
+                    destination = Destination(self.next_id(), self)
                     self.grid.place_agent(destination, (x, y))
+                    self.schedule.add(destination)
                     self.destinations.append((x, y))
     
     def setup_graph(self):
-        """Crea un grafo dirigido de NetworkX con las calles."""
+        """Crea un grafo conectado y cíclico (Toroidal)."""
+        self.G.clear()
+        
+        # Dimensiones para modulo
+        w = self.grid.width
+        h = self.grid.height
+        
         for row in range(len(city_map)):
             for col in range(len(city_map[row])):
                 cell = city_map[row][col]
-                
-                # Conversión de coordenadas
                 x = col
                 y = 23 - row
                 
-                # Solo agregar nodos para celdas transitables
                 if cell in ['v', '^', '>', '<', 'S', 'D']:
                     self.G.add_node((x, y))
                     
-                    # Agregar aristas según la dirección
-                    if cell == 'v':  # Sur (Y disminuye)
-                        if y > 0:
-                            self.G.add_edge((x, y), (x, y - 1))
-                    elif cell == '^':  # Norte (Y aumenta)
-                        if y < 23:
-                            self.G.add_edge((x, y), (x, y + 1))
-                    elif cell == '>':  # Este (X aumenta)
-                        if x < 23:
-                            self.G.add_edge((x, y), (x + 1, y))
-                    elif cell == '<':  # Oeste (X disminuye)
-                        if x > 0:
-                            self.G.add_edge((x, y), (x - 1, y))
-                    elif cell == 'S':
-                        # Semáforos conectan en todas direcciones
+                    # 1. Conexiones Principales (Direccionales)
+                    if cell == 'v':
+                        self.G.add_edge((x, y), (x, (y - 1) % h))
+                    elif cell == '^':
+                        self.G.add_edge((x, y), (x, (y + 1) % h))
+                    elif cell == '>':
+                        self.G.add_edge((x, y), ((x + 1) % w, y))
+                    elif cell == '<':
+                        self.G.add_edge((x, y), ((x - 1) % w, y))
+                    
+                    # 2. Cambios de Carril (Laterales) - CON BARRERA DE MEDIANA
+                    if cell in ['v', '^']:
+                        for dx in [-1, 1]:
+                            nx_x = (x + dx) % w
+                            n_row = 23 - y
+                            neighbor_cell = city_map[n_row][nx_x]
+                            if neighbor_cell == cell:
+                                self.G.add_edge((x, y), (nx_x, y))
+                                
+                    elif cell in ['<', '>']:
+                        for dy in [-1, 1]:
+                            nx_y = (y + dy) % h
+                            n_row = 23 - nx_y
+                            neighbor_cell = city_map[n_row][x]
+                            if neighbor_cell == cell:
+                                self.G.add_edge((x, y), (x, nx_y))
+
+                    # 3. Entradas a Destinos ('D')
+                    if cell in ['v', '^', '>', '<']:
                         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                            nx_pos = (x + dx, y + dy)
-                            if 0 <= nx_pos[0] < 24 and 0 <= nx_pos[1] < 24:
+                            nx_pos = ((x + dx) % w, (y + dy) % h)
+                            n_row = 23 - nx_pos[1]
+                            n_col = nx_pos[0]
+                            if city_map[n_row][n_col] == 'D':
                                 self.G.add_edge((x, y), nx_pos)
-                    elif cell == 'D':
-                        # Destinos conectan como nodos finales
+
+                    # 4. Semáforos ('S') - Conexión Inteligente
+                    if cell == 'S':
                         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                            nx_pos = (x + dx, y + dy)
-                            if 0 <= nx_pos[0] < 24 and 0 <= nx_pos[1] < 24:
+                            nx_pos = ((x + dx) % w, (y + dy) % h)
+                            n_row = 23 - nx_pos[1]
+                            n_col = nx_pos[0]
+                            neighbor_cell = city_map[n_row][n_col]
+                            
+                            if neighbor_cell == '#': 
+                                continue
+
+                            # Evitar contraflujo
+                            is_incoming = False
+                            if neighbor_cell == 'v' and dy == 1: is_incoming = True
+                            elif neighbor_cell == '^' and dy == -1: is_incoming = True
+                            elif neighbor_cell == '>' and dx == -1: is_incoming = True
+                            elif neighbor_cell == '<' and dx == 1: is_incoming = True
+                            
+                            if not is_incoming:
+                                self.G.add_edge((x, y), nx_pos)
+                                
+                    # 5. Salida de Destinos (D)
+                    elif cell == 'D':
+                        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                            nx_pos = ((x + dx) % w, (y + dy) % h)
+                            n_row = 23 - nx_pos[1]
+                            n_col = nx_pos[0]
+                            if city_map[n_row][n_col] != '#':
                                 self.G.add_edge((x, y), nx_pos)
     
     def spawn_car(self, start_pos=None, destination=None):
         """Genera un nuevo coche en la simulación."""
         if start_pos is None:
-            # Buscar una posición válida en el borde
             start_pos = self.get_random_spawn_point()
         
-        if destination is None and self.destinations:
-            # Elegir destino aleatorio
-            destination = random.choice(self.destinations)
+        # Seleccionar destino no ocupado CON DISTANCIA MÍNIMA
+        if destination is None:
+            available_destinations = [d for d in self.destinations if d not in self.occupied_destinations]
+            if not available_destinations:
+                return None
+            
+            # Intentar encontrar un destino con distancia mínima de 10 celdas
+            max_attempts = 20
+            for _ in range(max_attempts):
+                candidate = random.choice(available_destinations)
+                
+                # Calcular distancia Manhattan considerando toroide
+                dx = abs(candidate[0] - start_pos[0])
+                dy = abs(candidate[1] - start_pos[1])
+                dx = min(dx, self.grid.width - dx)
+                dy = min(dy, self.grid.height - dy)
+                manhattan_dist = dx + dy
+                
+                if manhattan_dist >= 10:
+                    destination = candidate
+                    break
+            else:
+                destination = random.choice(available_destinations)
         
-        car = Car(self, destination)
+        # Marcar destino como ocupado
+        self.occupied_destinations.add(destination)
+        
+        car = Car(self.next_id(), self, destination)
         self.grid.place_agent(car, start_pos)
+        self.schedule.add(car)
         return car
     
     def get_random_spawn_point(self):
@@ -261,8 +361,8 @@ class CityModel(Model):
     
     def step(self):
         """Ejecuta un paso de la simulación."""
-        self.agents.shuffle_do("step")
-    
+        self.schedule.step()
+        
     def serialize_grid(self):
         """Serializa el grid para Unity con información detallada."""
         data = []
