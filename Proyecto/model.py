@@ -11,8 +11,8 @@ city_map = [
     "v<<<<<<<<<<<S<<<<<<<<<<^", 
     "vv##vv##vvSS########D#^^",
     "SS#Dvv##vv^^#D########^^",  
-    "vvS<<<<<vv^^>>>>>>>>>>S^",  
-    "vvS<<<<<vv^^>>>>>>>>>>S^", 
+    "vvS<<<<<vv^^>>>>>>>>>S^^",  
+    "vvS<<<<<vv^^>>>>>>>>>S^^", 
     "vv##^^##vv^^#######D##SS", 
     "SS##^^##vv^^##########^^", 
     "vvS<<<<<<<<<<<<<<<<<<<^^",
@@ -41,6 +41,7 @@ class Car(Agent):
         self.destination = destination  # Coordenada (x, y) del destino
         self.path = []  # Lista de coordenadas para seguir
         self.parking_time = 0  # Contador para tiempo en estacionamiento
+        self.patience = 5 # Paciencia para recalcular ruta si se atasca
         
     def step(self):
         """Ejecuta un paso de movimiento del vehículo."""
@@ -67,7 +68,14 @@ class Car(Agent):
             if can_move:
                 self.model.grid.move_agent(self, next_pos)
                 self.path.pop(0)
-            # Si no puede moverse, simplemente espera al siguiente turno
+                self.patience = 5 # Reset patience on move
+            else:
+                # Si no puede moverse, decrementar paciencia
+                self.patience -= 1
+                if self.patience <= 0:
+                    # Paciencia agotada: intentar recalcular ruta (back-off)
+                    self.calculate_path()
+                    self.patience = 5 # Reset patience after recalc
     
     def calculate_path(self):
         """Calcula el camino más corto usando A* en el grafo de NetworkX."""
@@ -77,6 +85,7 @@ class Car(Agent):
                 self.path.pop(0)  # Remover posición actual
             except nx.NetworkXNoPath:
                 # No hay ruta posible - eliminar agente para evitar bloqueos
+                # print(f"Car {self.unique_id} removed: No Path from {self.pos} to {self.destination}")
                 self.model.grid.remove_agent(self)
                 self.model.schedule.remove(self)
                 self.path = []
@@ -92,26 +101,29 @@ class Car(Agent):
             
             # Lógica estricta de semáforos
             if isinstance(agent, TrafficLight):
-                if agent.state == "Green":
-                    return True
-                
-                # Lógica corregida para detectar movimiento en Toroide
+                # Detectar eje de movimiento real
                 dx = pos[0] - self.pos[0]
                 dy = pos[1] - self.pos[1]
-                
-                # Detectar eje de movimiento real
                 moving_vertically = (dy != 0)
                 moving_horizontally = (dx != 0)
                 
-                # Reglas estrictas:
-                # NS traffic light: Block if trying to cross vertically (Red/Yellow)
-                if agent.direction == "NS" and moving_vertically:
-                    return False
-                # EW traffic light: Block if trying to cross horizontally (Red/Yellow)
-                elif agent.direction == "EW" and moving_horizontally:
-                    return False
+                if agent.direction == "NS":
+                    if agent.state == "Green":
+                        # NS pasa, EW espera
+                        if moving_horizontally: return False
+                    else:
+                        # Red/Yellow: NS espera, EW pasa
+                        if moving_vertically: return False
+                        
+                elif agent.direction == "EW":
+                    if agent.state == "Green":
+                        # EW pasa, NS espera
+                        if moving_vertically: return False
+                    else:
+                        # Red/Yellow: EW espera, NS pasa
+                        if moving_horizontally: return False
                 
-                return False # Por defecto esperar en rojo
+                return True # Si no bloquea, permite (el semáforo es pasable)
         
         return True
 
@@ -119,11 +131,11 @@ class Car(Agent):
 class TrafficLight(Agent):
     """Agente que representa un semáforo con 3 estados: Green, Yellow, Red."""
     
-    def __init__(self, unique_id, model, direction="NS"):
+    def __init__(self, unique_id, model, direction="NS", state="Green", time_offset=0):
         super().__init__(unique_id, model)
-        self.state = "Green"  # Estados: "Green", "Yellow", "Red"
-        self.timer = 10  # Tiempo en cada estado
         self.direction = direction  # "NS" (Norte-Sur) o "EW" (Este-Oeste)
+        self.state = state
+        self.timer = 10 - time_offset if state == "Green" else 10 # Ajuste simple
         
         # Tiempos por estado
         self.green_time = 10
@@ -174,7 +186,7 @@ class CityModel(Model):
     
     def __init__(self, pre_spawn=0, width=24, height=24):
         super().__init__()
-        self.grid = MultiGrid(width, height, torus=True)  # TOROIDAL
+        self.grid = MultiGrid(width, height, torus=False)  # NO TOROIDAL
         self.schedule = RandomActivation(self)
         
         # Grafo dirigido para navegación
@@ -217,10 +229,76 @@ class CityModel(Model):
                     self.schedule.add(obstacle)
                     
                 elif cell == 'S':
-                    # Crear semáforo - determinar dirección según contexto
-                    # Por simplicidad, alternar entre NS y EW
-                    direction = "NS" if (row + col) % 2 == 0 else "EW"
-                    traffic_light = TrafficLight(self.next_id(), self, direction)
+                    # Crear semáforo con Sincronización por Vecindad
+                    
+                    direction = None
+                    state = None
+                    timer_value = 10
+                    
+                    # 1. Chequeo de Grupo (Sync): Verificar si hay semáforo a la IZQUIERDA
+                    if col > 0 and city_map[row][col-1] == 'S':
+                        # Buscar el agente TrafficLight en la posición izquierda
+                        left_x = col - 1
+                        left_y = 23 - row
+                        left_agents = self.grid.get_cell_list_contents([(left_x, left_y)])
+                        
+                        for agent in left_agents:
+                            if isinstance(agent, TrafficLight):
+                                # Copiar atributos del semáforo vecino (Sincronización)
+                                direction = agent.direction
+                                state = agent.state
+                                timer_value = agent.timer
+                                break
+                    
+                    # 2. Si no hay vecino 'S' a la izquierda (Es un Líder)
+                    if direction is None:
+                        # Determinar dirección mirando el flujo de la calle
+                        is_vertical = False
+                        is_horizontal = False
+                        
+                        # Checar flujo vertical (v arriba o ^ abajo)
+                        if row > 0 and city_map[row-1][col] == 'v': is_vertical = True
+                        if row < len(city_map)-1 and city_map[row+1][col] == '^': is_vertical = True
+                        
+                        # Checar flujo horizontal (> izquierda o < derecha)
+                        if col > 0 and city_map[row][col-1] == '>': is_horizontal = True
+                        if col < len(city_map[row])-1 and city_map[row][col+1] == '<': is_horizontal = True
+                        
+                        # Determinar dirección basado en flujo detectado
+                        if is_vertical:
+                            direction = "NS"
+                        elif is_horizontal:
+                            direction = "EW"
+                        else:
+                            # Fallback: usar heurística original si no se detecta flujo claro
+                            has_vertical = False
+                            has_horizontal = False
+                            
+                            if row > 0 and city_map[row-1][col] in ['v', '^', 'S']: has_vertical = True
+                            if row < len(city_map)-1 and city_map[row+1][col] in ['v', '^', 'S']: has_vertical = True
+                            
+                            if col > 0 and city_map[row][col-1] in ['<', '>', 'S']: has_horizontal = True
+                            if col < len(city_map[row])-1 and city_map[row][col+1] in ['<', '>', 'S']: has_horizontal = True
+                            
+                            if has_vertical and not has_horizontal:
+                                direction = "NS"
+                            elif has_horizontal and not has_vertical:
+                                direction = "EW"
+                            else:
+                                # Intersección: Alternar
+                                direction = "NS" if (row + col) % 2 == 0 else "EW"
+                        
+                        # Establecer estado inicial basado en Exclusión Mutua
+                        if direction == "NS":
+                            state = "Green"
+                            timer_value = 10
+                        else:  # "EW"
+                            state = "Red"
+                            timer_value = 10  # Desfasado
+                    
+                    # Crear el semáforo con los atributos determinados/copiados
+                    traffic_light = TrafficLight(self.next_id(), self, direction, state, 0)
+                    traffic_light.timer = timer_value  # Asignar timer después de creación
                     self.grid.place_agent(traffic_light, (x, y))
                     self.schedule.add(traffic_light)
                     
@@ -232,66 +310,130 @@ class CityModel(Model):
                     self.destinations.append((x, y))
     
     def setup_graph(self):
-        """Crea un grafo totalmente conectado permitiendo giros y cambios de carril, evitando solo contraflujos."""
+        """Crea un grafo dirigido estricto basado en las flechas y reglas de tránsito."""
         self.G.clear()
         
-        # Dimensiones para toroide
         w = self.grid.width
         h = self.grid.height
         
-        # Definir movimientos posibles (delta x, delta y)
-        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        # Mapeo de direcciones a deltas (dx, dy)
+        direction_deltas = {
+            '^': (0, 1),
+            'v': (0, -1),
+            '>': (1, 0),
+            '<': (-1, 0)
+        }
+        
+        neighbor_offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)]
         
         for row in range(len(city_map)):
             for col in range(len(city_map[row])):
                 cell = city_map[row][col]
                 x = col
-                y = 23 - row # Coordenada Mesa
+                y = 23 - row
                 
-                # Si es un obstáculo, no es un nodo navegable
                 if cell == '#':
                     continue
-                    
-                # Agregar nodo al grafo
+                
                 self.G.add_node((x, y))
                 
-                # Revisar los 4 vecinos para posibles conexiones
-                for dx, dy in directions:
-                    # Calcular coordenada vecino con TOROIDE (wrap-around)
-                    nx_x = (x + dx) % w
-                    nx_y = (y + dy) % h
+                # REGLA DE INTEGRIDAD DE AUTOPISTA
+                # 1. Identificar si la celda actual es parte de una vía multicarril
+                is_highway = False
+                if cell in direction_deltas:
+                    # Determinar vecinos laterales según dirección
+                    if cell in ['^', 'v']:  # Vertical: laterales son izquierda/derecha
+                        lateral_offsets = [(1, 0), (-1, 0)]
+                    else:  # Horizontal '<', '>': laterales son arriba/abajo
+                        lateral_offsets = [(0, 1), (0, -1)]
                     
-                    # Obtener qué hay en el vecino (convertir a coordenadas de mapa visual)
+                    # Verificar si algún lateral tiene la misma dirección
+                    for lat_dx, lat_dy in lateral_offsets:
+                        lat_x = x + lat_dx
+                        lat_y = y + lat_dy
+                        
+                        if 0 <= lat_x < w and 0 <= lat_y < h:
+                            lat_row = 23 - lat_y
+                            lat_col = lat_x
+                            lateral_cell = city_map[lat_row][lat_col]
+                            
+                            if lateral_cell == cell:  # Misma dirección = Highway
+                                is_highway = True
+                                break
+                
+                for dx, dy in neighbor_offsets:
+                    nx_x = x + dx
+                    nx_y = y + dy
+                    
+                    if not (0 <= nx_x < w and 0 <= nx_y < h):
+                        continue
+                        
                     n_row = 23 - nx_y
                     n_col = nx_x
                     neighbor_cell = city_map[n_row][n_col]
                     
-                    # 1. Regla: Nunca conectar con Paredes
                     if neighbor_cell == '#':
                         continue
                         
-                    # 2. Regla: Lógica de NO-CONTRAFLUJO (Evitar choques de frente)
-                    # Si yo soy '^' y vecino es 'v' (y está arriba), no conectar.
-                    traffic_collision = False
+                    can_connect = False
+                    reason = ""
                     
-                    # Analizar mi dirección (si soy calle)
-                    if cell == '^' and neighbor_cell == 'v': traffic_collision = True
-                    if cell == 'v' and neighbor_cell == '^': traffic_collision = True
-                    if cell == '>' and neighbor_cell == '<': traffic_collision = True
-                    if cell == '<' and neighbor_cell == '>': traffic_collision = True
+                    # A. Conexión Frontal
+                    if cell in direction_deltas:
+                        expected_dx, expected_dy = direction_deltas[cell]
+                        if (dx, dy) == (expected_dx, expected_dy):
+                            is_contraflow = False
+                            if cell == '^' and neighbor_cell == 'v': is_contraflow = True
+                            if cell == 'v' and neighbor_cell == '^': is_contraflow = True
+                            if cell == '>' and neighbor_cell == '<': is_contraflow = True
+                            if cell == '<' and neighbor_cell == '>': is_contraflow = True
+                            
+                            if not is_contraflow:
+                                can_connect = True
+                                reason = "Forward"
                     
-                    # 3. Regla especial para Semáforos y Destinos
-                    # Los semáforos y destinos son "neutrales", conectan con todo salvo paredes.
-                    # Pero las calles NO deben entrar a una calle en sentido contrario.
-                    
-                    if not traffic_collision:
-                        # Crear la arista (Edge)
-                        # Nota: NetworkX maneja caminos dirigidos.
-                        # Aquí decimos "Desde (x,y) puedo ir a (nx_x, nx_y)"
-                        self.G.add_edge((x, y), (nx_x, nx_y))
+                    # B. Cambio de Carril
+                    if cell in ['^', 'v', '<', '>'] and neighbor_cell == cell:
+                        my_dir = direction_deltas[cell]
+                        if my_dir[0]*dx + my_dir[1]*dy == 0:
+                            can_connect = True
+                            reason = "LaneChange"
+                            
+                    # C. Giros
+                    if cell in direction_deltas and neighbor_cell in direction_deltas:
+                        if cell in ['^', 'v'] and neighbor_cell in ['<', '>']:
+                            n_dir = direction_deltas[neighbor_cell]
+                            if (dx, dy) == n_dir:
+                                can_connect = True
+                                reason = "Turn"
+                        elif cell in ['<', '>'] and neighbor_cell in ['^', 'v']:
+                            n_dir = direction_deltas[neighbor_cell]
+                            if (dx, dy) == n_dir:
+                                can_connect = True
+                                reason = "Turn"
+
+                    # D. Intersecciones
+                    if neighbor_cell in ['S', 'D']:
+                        can_connect = True
+                        reason = "ToIntersection"
                         
-                    # Nota de optimización: Esta lógica permite giros. 
-                    # Ej: Desde '^' puedo ir a un vecino '>' (giro a la derecha).
+                    if cell in ['S', 'D']:
+                        if neighbor_cell in direction_deltas:
+                            n_dir = direction_deltas[neighbor_cell]
+                            if (dx, dy) == n_dir:
+                                can_connect = True
+                                reason = "FromIntersection"
+                        elif neighbor_cell in ['S', 'D']:
+                            can_connect = True
+                            reason = "IntersectionLink"
+                    
+                    # 2. APLICAR RESTRICCIÓN DE AUTOPISTA
+                    # Bloquear giros ilegales desde highways
+                    if is_highway and reason == "Turn":
+                        can_connect = False
+
+                    if can_connect:
+                        self.G.add_edge((x, y), (nx_x, nx_y))
     
     def spawn_car(self, start_pos=None, destination=None):
         """Genera un nuevo coche en la simulación."""
@@ -317,10 +459,20 @@ class CityModel(Model):
                 manhattan_dist = dx + dy
                 
                 if manhattan_dist >= 10:
-                    destination = candidate
-                    break
+                    # Verificar si existe ruta en el grafo
+                    if nx.has_path(self.G, start_pos, candidate):
+                        destination = candidate
+                        break
             else:
-                destination = random.choice(available_destinations)
+                # Si falla el intento de distancia, buscar cualquiera válido
+                random.shuffle(available_destinations)
+                for d in available_destinations:
+                    if nx.has_path(self.G, start_pos, d):
+                        destination = d
+                        break
+        
+        if destination is None:
+            return None # No se encontró destino válido
         
         # Marcar destino como ocupado
         self.occupied_destinations.add(destination)
@@ -380,5 +532,3 @@ class CityModel(Model):
                 data.append(agent_data)
         
         return data
-    
-    
