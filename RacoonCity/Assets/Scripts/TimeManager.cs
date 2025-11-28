@@ -37,10 +37,11 @@ public class TimeManager : MonoBehaviour
     public void Update()
     {
         tempSecond += Time.deltaTime;
- 
-        if (tempSecond >= 1)
+
+        if (tempSecond >= 1) // Si ha pasado 1 segundo real
         {
-            Minutes += 1;
+            int velocidad = 10; // Ejemplo: 10 minutos por segundo (10x más rápido)
+            Minutes += velocidad;
             tempSecond = 0;
         }
     }
