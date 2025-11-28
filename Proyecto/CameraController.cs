@@ -1,38 +1,55 @@
 using UnityEngine;
 
-public class CameraController : MonoBehaviour
+public class CameraSwitcher : MonoBehaviour
 {
-    public float normalSpeed = 10f;   // Velocidad normal
-    public float fastSpeed = 50f;     // Velocidad con Shift presionado
-    public float sensitivity = 3f;    // Sensibilidad del mouse
+    // Arreglo para almacenar todas las cámaras que quieres rotar.
+    // Asigna las cámaras en el Inspector.
+    public GameObject[] cameras; 
+
+    // Índice de la cámara actualmente activa.
+    private int currentCameraIndex = 0; 
+
+    void Start()
+    {
+        // Validación inicial: nos aseguramos de que haya cámaras.
+        if (cameras.Length == 0)
+        {
+            Debug.LogError("No se han asignado cámaras al script CameraSwitcher.");
+            return;
+        }
+
+        // Activamos la primera cámara y desactivamos las demás.
+        ActivateCamera(currentCameraIndex);
+    }
 
     void Update()
     {
-        // -- 1. Movimiento (WASD) --
-        // Si mantienes Shift, vas más rápido
-        float currentSpeed = Input.GetKey(KeyCode.LeftShift) ? fastSpeed : normalSpeed;
-        
-        // Leemos las teclas (W, S, A, D)
-        float x = Input.GetAxis("Horizontal"); // A y D
-        float z = Input.GetAxis("Vertical");   // W y S
-
-        // Mover la cámara
-        Vector3 move = transform.right * x + transform.forward * z;
-        transform.position += move * currentSpeed * Time.deltaTime;
-
-        // -- 2. Altura (Q y E) --
-        if (Input.GetKey(KeyCode.E)) transform.position += Vector3.up * currentSpeed * Time.deltaTime; // Subir
-        if (Input.GetKey(KeyCode.Q)) transform.position -= Vector3.up * currentSpeed * Time.deltaTime; // Bajar
-
-        // -- 3. Rotación (Click Derecho presionado) --
-        if (Input.GetMouseButton(1))
+        // Chequea si la tecla 'C' es presionada.
+        if (Input.GetKeyDown(KeyCode.C))
         {
-            float mouseX = Input.GetAxis("Mouse X") * sensitivity;
-            float mouseY = Input.GetAxis("Mouse Y") * sensitivity;
+            SwitchCamera();
+        }
+    }
 
-            // Rotar la cámara
-            Vector3 currentRot = transform.localEulerAngles;
-            transform.localRotation = Quaternion.Euler(currentRot.x - mouseY, currentRot.y + mouseX, 0);
+    void SwitchCamera()
+    {
+        // Desactiva la cámara actual.
+        cameras[currentCameraIndex].SetActive(false);
+
+        // Mueve al siguiente índice. Si llegamos al final del arreglo, 
+        // volvemos al principio (0).
+        currentCameraIndex = (currentCameraIndex + 1) % cameras.Length;
+
+        // Activa la nueva cámara.
+        ActivateCamera(currentCameraIndex);
+    }
+
+    void ActivateCamera(int index)
+    {
+        if (index >= 0 && index < cameras.Length)
+        {
+            cameras[index].SetActive(true);
+            Debug.Log("Cambiando a: " + cameras[index].name);
         }
     }
 }
