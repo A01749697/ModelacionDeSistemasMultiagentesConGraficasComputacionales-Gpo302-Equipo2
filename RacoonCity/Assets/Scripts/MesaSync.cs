@@ -4,6 +4,10 @@ using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
+/// <summary>
+/// MesaSync es el cliente de Unity que se conecta al servidor Python (autoridad).
+/// Unity solo visualiza - Python controla la simulación.
+/// </summary>
 public class MesaSync : MonoBehaviour
 {
     public static MesaSync Instance;
@@ -18,15 +22,14 @@ public class MesaSync : MonoBehaviour
     [Header("Settings")]
     public Transform agentsRoot;
     public float stepInterval = 0.1f; // Tiempo entre pasos de simulación
-    public float interpolationSpeed = 5f; // Velocidad de interpolación para movimiento suave
 
     [Header("Traffic Light Materials")]
     public Material greenLightMaterial;
     public Material yellowLightMaterial;
     public Material redLightMaterial;
 
+    // Diccionario para rastrear agentes activos en Unity
     private Dictionary<int, GameObject> unityAgents = new Dictionary<int, GameObject>();
-    private Dictionary<int, Vector3> targetPositions = new Dictionary<int, Vector3>();
     private float stepTimer = 0f;
 
     async void Awake()
@@ -91,6 +94,10 @@ public class MesaSync : MonoBehaviour
         });
     }
 
+    /// <summary>
+    /// Sincroniza el estado de Unity con el estado de Python.
+    /// Patrón: Spawn nuevos, Update existentes, Destroy eliminados.
+    /// </summary>
     private void ApplyMesaState(JArray agents)
     {
         // Marcamos los agentes vistos en esta actualización
@@ -106,32 +113,51 @@ public class MesaSync : MonoBehaviour
             string direction = a["direction"]?.ToString();
             
             seen.Add(id);
+            Vector3 newPosition = new Vector3(x, 0f, y);
 
-            // Crear agente si no existe
+            // SPAWN: Crear agente si no existe
             if (!unityAgents.ContainsKey(id))
             {
                 GameObject prefab = GetPrefabForType(agentType);
                 if (prefab != null)
                 {
-                    var go = Instantiate(prefab, agentsRoot);
+                    GameObject go = Instantiate(prefab, agentsRoot);
                     go.name = $"{agentType}_{id}";
                     
+                    // Inicializar AgentController
                     var ctrl = go.GetComponent<AgentController>();
-                    if (ctrl != null) ctrl.agentID = id;
+                    if (ctrl != null)
+                    {
+                        ctrl.Init(id, newPosition);
+                    }
+                    else
+                    {
+                        // Si no tiene AgentController, posicionar directamente
+                        go.transform.localPosition = newPosition;
+                    }
                     
                     unityAgents[id] = go;
-                    
-                    // Posición inicial sin interpolación
-                    go.transform.localPosition = new Vector3(x, 0f, y);
-                    targetPositions[id] = new Vector3(x, 0f, y);
-                    
-                    Debug.Log($"[MesaSync] Created {agentType} with ID {id} at ({x}, {y})");
+                    Debug.Log($"[MesaSync] ✨ Spawned {agentType} with ID {id} at ({x}, {y})");
                 }
             }
+            // UPDATE: Actualizar posición de agente existente
             else
             {
-                // Actualizar posición objetivo para interpolación
-                targetPositions[id] = new Vector3(x, 0f, y);
+                GameObject go = unityAgents[id];
+                if (go != null)
+                {
+                    var ctrl = go.GetComponent<AgentController>();
+                    if (ctrl != null)
+                    {
+                        // Delegar interpolación al AgentController
+                        ctrl.UpdatePosition(newPosition);
+                    }
+                    else
+                    {
+                        // Si no tiene AgentController, mover directamente
+                        go.transform.localPosition = newPosition;
+                    }
+                }
             }
 
             // Actualizar estado específico del tipo de agente
@@ -145,7 +171,7 @@ public class MesaSync : MonoBehaviour
             }
         }
 
-        // Eliminamos agentes que ya no existen en Mesa
+        // DESTROY: Eliminar agentes que ya no existen en Mesa
         List<int> toRemove = new List<int>();
         foreach (var kv in unityAgents)
         {
@@ -161,7 +187,6 @@ public class MesaSync : MonoBehaviour
                 Destroy(unityAgents[id]);
                 unityAgents.Remove(id);
             }
-            targetPositions.Remove(id);
         }
     }
 
@@ -222,6 +247,7 @@ public class MesaSync : MonoBehaviour
     {
         if (!unityAgents.ContainsKey(id)) return;
         // Aquí puedes añadir lógica adicional para coches
+        // Por ejemplo, animaciones según el estado
     }
 
     void Update()
@@ -240,29 +266,6 @@ public class MesaSync : MonoBehaviour
         {
             stepTimer = 0f;
             SendStepCommand();
-        }
-
-        // Interpolación suave de posiciones
-        InterpolateAgentPositions();
-    }
-
-    private void InterpolateAgentPositions()
-    {
-        foreach (var kv in unityAgents)
-        {
-            int id = kv.Key;
-            GameObject go = kv.Value;
-            if (go == null) continue;
-
-            if (targetPositions.ContainsKey(id))
-            {
-                Vector3 targetPos = targetPositions[id];
-                go.transform.localPosition = Vector3.Lerp(
-                    go.transform.localPosition,
-                    targetPos,
-                    Time.deltaTime * interpolationSpeed
-                );
-            }
         }
     }
 
