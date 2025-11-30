@@ -185,7 +185,11 @@ class CityModel(Model):
             '<': (-1, 0)
         }
         
-        neighbor_offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        neighbor_offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)] # Von Neumann (4-vecinos)
+        # Nota: Para diagonales en intersecciones, podríamos necesitar Moore, 
+        # pero el user pide "Lateral" para LaneChange, así que 4-vecinos es seguro para calles.
+        # Para entrar a intersecciones, a veces están en diagonal? 
+        # El mapa parece ortogonal. Asumiremos 4-vecinos por ahora.
         
         for row in range(len(city_map)):
             for col in range(len(city_map[row])):
@@ -198,30 +202,7 @@ class CityModel(Model):
                 
                 self.G.add_node((x, y))
                 
-                # REGLA DE INTEGRIDAD DE AUTOPISTA
-                # 1. Identificar si la celda actual es parte de una vía multicarril
-                is_highway = False
-                if cell in direction_deltas:
-                    # Determinar vecinos laterales según dirección
-                    if cell in ['^', 'v']:  # Vertical: laterales son izquierda/derecha
-                        lateral_offsets = [(1, 0), (-1, 0)]
-                    else:  # Horizontal '<', '>': laterales son arriba/abajo
-                        lateral_offsets = [(0, 1), (0, -1)]
-                    
-                    # Verificar si algún lateral tiene la misma dirección
-                    for lat_dx, lat_dy in lateral_offsets:
-                        lat_x = x + lat_dx
-                        lat_y = y + lat_dy
-                        
-                        if 0 <= lat_x < w and 0 <= lat_y < h:
-                            lat_row = 23 - lat_y
-                            lat_col = lat_x
-                            lateral_cell = city_map[lat_row][lat_col]
-                            
-                            if lateral_cell == cell:  # Misma dirección = Highway
-                                is_highway = True
-                                break
-                
+                # Reglas de Conexión
                 for dx, dy in neighbor_offsets:
                     nx_x = x + dx
                     nx_y = y + dy
@@ -237,80 +218,77 @@ class CityModel(Model):
                         continue
                         
                     can_connect = False
-                    reason = ""
+                    weight = 1
                     
-                    # A. Conexión Frontal
+                    # 1. ESTOY EN CALLE (^, v, <, >)
                     if cell in direction_deltas:
-                        expected_dx, expected_dy = direction_deltas[cell]
-                        if (dx, dy) == (expected_dx, expected_dy):
-                            is_contraflow = False
-                            if cell == '^' and neighbor_cell == 'v': is_contraflow = True
-                            if cell == 'v' and neighbor_cell == '^': is_contraflow = True
-                            if cell == '>' and neighbor_cell == '<': is_contraflow = True
-                            if cell == '<' and neighbor_cell == '>': is_contraflow = True
-                            
-                            if not is_contraflow:
-                                can_connect = True
-                                reason = "Forward"
-                    
-                    # B. Cambio de Carril
-                    if cell in ['^', 'v', '<', '>'] and neighbor_cell == cell:
                         my_dir = direction_deltas[cell]
-                        if my_dir[0]*dx + my_dir[1]*dy == 0:
-                            can_connect = True
-                            reason = "LaneChange"
-                            
-                    # C. Giros
-                    if cell in direction_deltas and neighbor_cell in direction_deltas:
-                        if cell in ['^', 'v'] and neighbor_cell in ['<', '>']:
-                            n_dir = direction_deltas[neighbor_cell]
-                            if (dx, dy) == n_dir:
-                                can_connect = True
-                                reason = "Turn"
-                        elif cell in ['<', '>'] and neighbor_cell in ['^', 'v']:
-                            n_dir = direction_deltas[neighbor_cell]
-                            if (dx, dy) == n_dir:
-                                can_connect = True
-                                reason = "Turn"
-
-                    # D. Intersecciones
-                    if neighbor_cell in ['S', 'D']:
-                        can_connect = True
-                        reason = "ToIntersection"
                         
-                    if cell in ['S', 'D']:
+                        # A. Movimiento Frontal (Forward)
+                        if (dx, dy) == my_dir:
+                            can_connect = True
+                            weight = 1
+                        
+                        # B. Cambio de Carril (LaneChange)
+                        # Solo si vecino es calle, tiene MISMA dirección, y es movimiento LATERAL
+                        elif neighbor_cell in direction_deltas:
+                            n_dir = direction_deltas[neighbor_cell]
+                            if n_dir == my_dir: # Misma dirección
+                                # Verificar ortogonalidad (producto punto 0)
+                                if my_dir[0]*dx + my_dir[1]*dy == 0:
+                                    can_connect = True
+                                    weight = 10 # Penalización alta
+                        
+                        # C. Entrada a Intersección (S, D)
+                        # Solo si el movimiento es consistente con mi dirección (no reversa)
+                        elif neighbor_cell in ['S', 'D']:
+                            # Producto punto >= 0 (ángulo <= 90 grados)
+                            dot_prod = my_dir[0]*dx + my_dir[1]*dy
+                            if dot_prod >= 0:
+                                can_connect = True
+                                weight = 1
+                                if neighbor_cell == 'D': weight = 100 # Evitar paso por parking
+                    
+                    # 2. ESTOY EN INTERSECCIÓN (S, D)
+                    elif cell in ['S', 'D']:
+                        # A. Salida a Calle
                         if neighbor_cell in direction_deltas:
                             n_dir = direction_deltas[neighbor_cell]
-                            if (dx, dy) == n_dir:
+                            # Contraflujo: No entrar si la calle viene hacia mí
+                            # (dx, dy) == -n_dir  => Contraflujo directo
+                            if (dx, dy) != (-n_dir[0], -n_dir[1]):
                                 can_connect = True
-                                reason = "FromIntersection"
+                                # Peso: 1 si recto, 2 si giro (heurística simple)
+                                # Difícil saber "recto" sin saber de dónde vengo, pero asumimos 1 general
+                                # y penalizamos si parece giro brusco? Dejemos 1 por defecto.
+                                weight = 1
+                        
+                        # B. Conexión Interna (S-S, S-D, D-S)
                         elif neighbor_cell in ['S', 'D']:
                             can_connect = True
-                            reason = "IntersectionLink"
+                            weight = 1
                     
-                    # 2. APLICAR RESTRICCIÓN DE AUTOPISTA
-                    # Bloquear giros ilegales desde highways
-                    if is_highway and reason == "Turn":
-                        can_connect = False
-
                     if can_connect:
-                        # SISTEMA DE PESOS: Asignar costo según tipo de movimiento
-                        weight = 1  # Default
-                        
-                        if reason == "Forward":
-                            weight = 1  # Preferencia máxima
-                        elif reason == "Turn":
-                            weight = 2  # Penalización moderada
-                        elif reason == "LaneChange":
-                            weight = 5  # Penalización alta (evita zig-zag)
-                        elif reason in ["ToIntersection", "FromIntersection", "IntersectionLink"]:
-                            weight = 1  # Sin penalización
-                        
-                        # PROTECCIÓN DE ESTACIONAMIENTOS: Si el destino es 'D', peso altísimo
-                        if neighbor_cell == 'D':
-                            weight = 100  # Evita usar parkings como atajos
-                        
                         self.G.add_edge((x, y), (nx_x, nx_y), weight=weight)
+
+        # REPORTE DE CONECTIVIDAD
+        print(f"--- REPORTE DE GRAFO ---")
+        print(f"Nodos: {self.G.number_of_nodes()}, Aristas: {self.G.number_of_edges()}")
+        
+        unreachable_destinations = []
+        for dest in self.destinations:
+            if dest.pos in self.G:
+                in_degree = self.G.in_degree(dest.pos)
+                if in_degree == 0:
+                    unreachable_destinations.append(dest.unique_id)
+            else:
+                unreachable_destinations.append(f"{dest.unique_id} (No en Grafo)")
+        
+        if unreachable_destinations:
+            print(f"⚠️ DESTINOS INALCANZABLES (Grado Entrada 0): {unreachable_destinations}")
+        else:
+            print(f"✅ Todos los destinos son alcanzables.")
+        print("------------------------")
     
     def spawn_car(self, start_pos=None, agent_type=Car):
         """Genera un nuevo coche en la simulación."""

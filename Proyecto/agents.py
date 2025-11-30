@@ -7,146 +7,174 @@ class Car(Agent):
     
     def __init__(self, unique_id, model, destination=None, parking_limit=3):
         super().__init__(unique_id, model)
-        self.destination = destination 
-        self.path = []
-        self.parking_time = 0
+        self.destination = destination
+        self.state = "WANDERING" if destination is None else "DRIVING"
+        self.parking_timer = 0
         self.parking_limit = parking_limit
-        self.patience = 3
-        self.state = "DRIVING" # DRIVING, PARKED, WANDERING
+        self.path = []
+        self.patience = 3 # Intentos antes de recalcular ruta
+        self.do_not_park_here = None # Evitar re-parking inmediato (Boomerang Bug)
         
-        # DIAGNÓSTICO: Activar debug solo para el primer coche
-        self.debug = (unique_id == 0)
+        # DIAGNÓSTICO: Sistema de detección de atascos
+        self.debug = (unique_id == 0)  # Por defecto solo agente 0
         
     def step(self):
-        """Ejecuta un paso de movimiento del vehículo."""
+        """Avanza un paso en la simulación."""
         
-        # 0. Si no tengo destino, buscar uno (Contract Net)
-        if self.destination is None:
-            self.broadcast_request()
-            if self.destination is None:
-                # Si falló la subasta, vagar un poco
+        # DEBUG: Mostrar estado al inicio
+        if self.debug: print(f"🚗 AGENTE {self.unique_id} step() | pos={self.pos}, destination={self.destination}, state={self.state}")
+        
+        # 1. Freno por Choque: Si está chocado, no se mueve
+        if self.state == "CRASHED":
+            return
+
+        # 2. Estado PARKED
+        if self.state == "PARKED":
+            self.parking_timer -= 1
+            if self.parking_timer <= 0:
+                # Salir del parking
+                if self.destination:
+                    self.do_not_park_here = self.destination # Recordar dónde estábamos
+                    self.destination.release() # LIBERAR COLOR
+                    self.destination = None
+                
                 self.state = "WANDERING"
-                self.wandering_step()
+                # No eliminamos al agente, sigue circulando
+                if self.debug: print(f"🚗 AGENTE {self.unique_id} saliendo de parking -> WANDERING")
+            return
+
+        # 3. Navegación con Destino (DRIVING)
+        if self.destination:
+            # Si llegamos al destino
+            if self.pos == self.destination.pos:
+                self.state = "PARKED"
+                self.parking_timer = self.parking_limit
+                self.destination.occupant = self
+                # No removemos de grid ni schedule
+                return
+            
+            # Si no tenemos ruta, calcularla
+            if not self.path:
+                self.calculate_path()
+            
+            # Intentar seguir la ruta
+            if self.path:
+                next_pos = self.path[0]
+                can_move = self.can_move_to(next_pos)
+                
+                if can_move:
+                    self.model.grid.move_agent(self, next_pos)
+                    self.path.pop(0)
+                    self.patience = 3 
+                else:
+                    self.patience -= 1
+                    if self.patience <= 0:
+                        self.calculate_path()
+                        self.patience = 3
+        
+        # 4. Navegación sin Destino (WANDERING)
+        else:
+            # Intentar negociar uno
+            if self.debug: print(f"🔍 AGENTE {self.unique_id} sin destino, llamando broadcast_request()...")
+            self.broadcast_request()
+            
+            # Si consiguió destino, cambiar a DRIVING (se procesará en el siguiente step o aquí mismo si quisiéramos)
+            if self.destination:
+                self.do_not_park_here = None # Ya encontramos nuevo destino, perdonar el anterior
+                self.state = "DRIVING"
+                self.calculate_path()
                 return
 
-        # MAQUINA DE ESTADOS
-        if self.state == "PARKED":
-            self.parking_time += 1
-            if self.parking_time > self.parking_limit:
-                # Salir del estacionamiento
-                self.destination.release() # Liberar el agente destino
-                self.model.grid.remove_agent(self)
-                self.model.schedule.remove(self)
-            return
-
-        # Lógica de movimiento (DRIVING o WANDERING)
-        # Verificar si llegamos al destino (comparando coordenadas)
-        dest_pos = self.destination.pos if self.destination else None
-        
-        if dest_pos and self.pos == dest_pos:
-            # Llegamos al destino
-            # Verificar si sigue siendo nuestro (reserved_by == self)
-            if self.destination.reserved_by == self:
-                 # Éxito: Ocupar
-                 self.state = "PARKED"
-                 self.destination.occupant = self
-                 self.parking_time = 0
-            else:
-                 # Conflicto: Alguien nos robó el lugar o expiró reserva
-                 self.destination = None
-                 self.state = "WANDERING"
-            return
-        
-        # Si no tenemos ruta, calcularla
-        if not self.path and self.destination:
-            self.calculate_path()
-        
-        # Intentar moverse
-        if self.path:
-            next_pos = self.path[0]
-            can_move = self.can_move_to(next_pos)
+            # Si sigue sin destino, vagar
+            self.state = "WANDERING"
+            next_pos = self.get_wandering_move()
             
-            if can_move:
+            if next_pos:
                 self.model.grid.move_agent(self, next_pos)
-                self.path.pop(0)
-                self.patience = 3 
-            else:
-                self.patience -= 1
-                if self.patience <= 0:
-                    self.calculate_path()
-                    self.patience = 3
-        elif self.state == "WANDERING":
-            self.wandering_step()
+            # Si next_pos es None, se queda quieto (esperando semáforo)
 
-    def broadcast_request(self):
-        """Protocolo Contract Net: Solicitar ofertas a todos los destinos."""
-        best_bid = float('inf')
-        best_dest = None
-        
-        for dest in self.model.destinations:
-            bid = dest.calculate_bid(self.pos)
-            if bid < best_bid:
-                # Verificar alcanzabilidad (opcional pero recomendado)
-                if nx.has_path(self.model.G, self.pos, dest.pos):
-                    best_bid = bid
-                    best_dest = dest
-        
-        if best_dest:
-            best_dest.book(self)
-            self.destination = best_dest
-            self.state = "DRIVING"
-            self.calculate_path()
-
-    def wandering_step(self):
-        """Movimiento inteligente cuando no hay destino (prefiere menor costo)."""
+    def get_wandering_move(self):
+        """Decide el movimiento en modo WANDERING evitando el 'baile' en semáforos."""
         neighbors = self.model.grid.get_neighborhood(self.pos, moore=False, include_center=False)
-        valid_neighbors = []
+        valid_options = []
+        
+        # 1. Obtener vecinos conectados por arista
         for n in neighbors:
-            # FIX: Verificar explícitamente si existe arista en el grafo dirigido
-            if self.can_move_to(n) and self.model.G.has_edge(self.pos, n):
-                valid_neighbors.append(n)
+            if self.model.G.has_edge(self.pos, n):
+                weight = self.model.G.edges[self.pos, n]['weight']
+                valid_options.append((n, weight))
         
-        if valid_neighbors:
-            # WANDERING INTELIGENTE: Preferir vecinos con menor peso (90% probabilidad)
-            if random.random() < 0.9:
-                # Elegir vecino con menor peso de arista
-                min_weight = float('inf')
-                best_neighbor = None
-                for n in valid_neighbors:
-                    edge_weight = self.model.G.edges[self.pos, n]['weight']
-                    if edge_weight < min_weight:
-                        min_weight = edge_weight
-                        best_neighbor = n
-                next_pos = best_neighbor
-            else:
-                # 10% del tiempo: elegir random para evitar bucles
-                next_pos = random.choice(valid_neighbors)
+        # 2. Ordenar por peso (menor peso = preferencia ir recto)
+        valid_options.sort(key=lambda x: x[1])
+        
+        if not valid_options:
+            return None
             
-            self.model.grid.move_agent(self, next_pos)
-    
-    def calculate_path(self):
-        """Calcula el camino más corto usando A* con pesos."""
-        if self.destination and self.pos in self.model.G and self.destination.pos in self.model.G:
-            try:
-                # PATHFINDING PONDERADO: Usar pesos para preferir rutas directas
-                self.path = nx.shortest_path(self.model.G, self.pos, self.destination.pos, weight='weight')
-                if self.path:
-                    self.path.pop(0)  # Remover posición actual
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                self.destination = None # Invalidar destino inalcanzable
-                self.state = "WANDERING"
-                self.path = []
-    
+        # 3. Evaluar opciones
+        # REGLA: Si la mejor opción (recto) está bloqueada por SEMÁFORO, esperar.
+        # Si está bloqueada por COCHE, intentar la siguiente.
+        
+        best_pos, best_weight = valid_options[0]
+        
+        # A. Chequeo de Semáforo (Prioridad 1)
+        if not self.can_pass_traffic_light(best_pos):
+            if self.debug: print(f"🛑 AGENTE {self.unique_id} esperando en semáforo ROJO/AMARILLO hacia {best_pos}")
+            return None # ESPERAR (No bailar)
+            
+        # B. Chequeo de Ocupación Física (Iterar opciones)
+        for next_pos, weight in valid_options:
+            # Ya chequeamos semáforo para la primera opción. 
+            # Para las siguientes (cambio de carril), también deberíamos checar semáforo?
+            # Si cambio de carril, el semáforo de ese carril aplica.
+            if not self.can_pass_traffic_light(next_pos):
+                continue # Si esa opción también tiene rojo, skip
+                
+            if self.can_move_to(next_pos):
+                return next_pos
+                
+        return None
+
+    def can_pass_traffic_light(self, pos):
+        """
+        Verifica si el semáforo permite el paso.
+        FIX: Si ya estamos DENTRO de una intersección (self.pos tiene semáforo),
+        siempre permitimos avanzar para despejar el cruce.
+        """
+        # 1. Checar si estoy dentro de la intersección
+        my_cell_contents = self.model.grid.get_cell_list_contents([self.pos])
+        am_i_in_intersection = any(isinstance(a, TrafficLight) for a in my_cell_contents)
+        
+        if am_i_in_intersection:
+            return True # Regla de oro: Despejar intersección siempre
+            
+        # 2. Lógica normal de entrada (si vengo de la calle)
+        cell_contents = self.model.grid.get_cell_list_contents([pos])
+        for agent in cell_contents:
+            if isinstance(agent, TrafficLight):
+                if agent.state == "Green":
+                    return True
+                elif agent.state in ["Red", "Yellow"]:
+                    # Bloqueo por ejes
+                    dx = pos[0] - self.pos[0]
+                    dy = pos[1] - self.pos[1]
+                    
+                    if agent.direction == "NS": # NS light blocks vertical movement
+                        if dy != 0: return False
+                    elif agent.direction == "EW": # EW light blocks horizontal movement
+                        if dx != 0: return False
+        return True
+
     def can_move_to(self, pos):
-        """Verifica si el coche puede moverse a la posición dada."""
+        """Verifica si el coche puede moverse a la posición dada (Semáforos, Coches, Obstáculos)."""
         if pos not in self.model.G:
-            if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: No Node in Graph")
             return False
         
-        # FIX: Verificar dirección del grafo (One-Way Streets)
         if not self.model.G.has_edge(self.pos, pos):
-            if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: No Edge (Wrong Way)")
             return False
+        
+        # Verificar Semáforo primero (reutilizando lógica)
+        if not self.can_pass_traffic_light(pos):
+             return False
         
         cell_contents = self.model.grid.get_cell_list_contents([pos])
         
@@ -154,40 +182,49 @@ class Car(Agent):
         for agent in cell_contents:
             if isinstance(agent, Destination):
                 if agent != self.destination:
-                    if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: Private Parking {agent.unique_id}")
                     return False
         
-        # No puede moverse si hay otro coche
+        # No puede moverse si hay otro coche u obstáculo
         for agent in cell_contents:
             if isinstance(agent, Car):
-                if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: Car Ahead {agent.unique_id}")
                 return False
-            
-            # Lógica de semáforos permisiva
-            if isinstance(agent, TrafficLight):
-                if agent.state == "Green":
-                    if self.debug: print(f"✅ MOVE OK at {self.pos} -> {pos} | Green Light")
-                    return True # Pasa siempre
-                elif agent.state in ["Red", "Yellow"]:
-                    # Solo bloquea si intentas cruzar su eje
-                    
-                    # Calcular dirección de movimiento
-                    dx = pos[0] - self.pos[0]
-                    dy = pos[1] - self.pos[1]
-                    
-                    # Si el semáforo es NS (Norte-Sur), bloquea movimiento vertical
-                    if agent.direction == "NS":
-                        if dy != 0: # Intento moverme verticalmente
-                            if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: Red Light NS")
-                            return False
-                    # Si es EW (Este-Oeste), bloquea movimiento horizontal
-                    elif agent.direction == "EW":
-                        if dx != 0: # Intento moverme horizontalmente
-                            if self.debug: print(f"🛑 BLOCKED at {self.pos} -> {pos} | Reason: Red Light EW")
-                            return False
+            if isinstance(agent, Obstacle):
+                return False
         
-        if self.debug: print(f"✅ MOVE OK at {self.pos} -> {pos}")
         return True
+
+    def broadcast_request(self):
+        """Protocolo Contract Net: Solicitar ofertas a todos los destinos."""
+        best_bid = float('inf')
+        best_dest = None
+        
+        for dest in self.model.destinations:
+            if dest == self.do_not_park_here:
+                continue # Ignorar el lugar del que acabamos de salir
+                
+            bid = dest.calculate_bid(self.pos)
+            if bid < best_bid:
+                best_bid = bid
+                best_dest = dest
+        
+        if best_dest:
+            best_dest.book(self)
+            self.destination = best_dest
+            self.state = "DRIVING"
+            self.calculate_path()
+
+    def calculate_path(self):
+        """Calcula la ruta usando A* ponderado."""
+        if self.destination and self.pos in self.model.G and self.destination.pos in self.model.G:
+            try:
+                self.path = nx.shortest_path(self.model.G, self.pos, self.destination.pos, weight='weight')
+                if len(self.path) > 0:
+                    self.path.pop(0)
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                self.destination.release()
+                self.destination = None
+                self.state = "WANDERING"
+                self.path = []
 
 
 class TrafficLight(Agent):
@@ -228,7 +265,6 @@ class Obstacle(Agent):
         super().__init__(unique_id, model)
     
     def step(self):
-        """Los obstáculos no tienen lógica de paso."""
         pass
 
 
@@ -241,7 +277,6 @@ class Destination(Agent):
         self.reserved_by = None
     
     def step(self):
-        """Los destinos no tienen lógica de paso activa, reaccionan a mensajes."""
         pass
 
     def calculate_bid(self, car_pos):
@@ -274,15 +309,9 @@ class ChaoticCar(Car):
         """Ignora semáforos, solo verifica límites y obstáculos estáticos."""
         if pos not in self.model.G:
             return False
-            
-        # FIX: ChaoticCar TAMBIÉN debe respetar dirección de calle para evitar deadlocks
         if not self.model.G.has_edge(self.pos, pos):
             return False
 
-        # No verificamos contenido de celda aquí para permitir 'choque' en step
-        # Pero si es un Obstacle (edificio), sí deberíamos respetar física básica?
-        # El user dice: "Si intenta moverse a una celda ocupada por otro Car... No se detiene. Choca."
-        # Asumimos que Obstacle es muro.
         cell_contents = self.model.grid.get_cell_list_contents([pos])
         for agent in cell_contents:
             if isinstance(agent, Obstacle):
@@ -295,7 +324,11 @@ class ChaoticCar(Car):
         if not self.path and self.destination:
             self.calculate_path()
         elif not self.path and not self.destination:
-             self.wandering_step()
+             # Usar lógica simple de wandering
+             self.state = "WANDERING"
+             next_pos = self.get_wandering_move() # Reutilizamos, pero Chaotic ignora semáforos en can_move_to
+             if next_pos:
+                 self.model.grid.move_agent(self, next_pos)
              return
 
         # 2. Moverse
@@ -316,23 +349,22 @@ class ChaoticCar(Car):
                 # ChaoticCar huye
                 self.destination = None 
                 self.path = []
-                self.wandering_step() 
+                # Simple wandering escape
+                neighbors = self.model.grid.get_neighborhood(self.pos, moore=False, include_center=False)
+                valid = [n for n in neighbors if self.can_move_to(n)]
+                if valid:
+                    self.model.grid.move_agent(self, random.choice(valid))
             else:
-                # Movimiento normal (o choque con otro ChaoticCar/PoliceCar si no filtramos)
                 if self.can_move_to(next_pos):
                     self.model.grid.move_agent(self, next_pos)
                     self.path.pop(0)
                 else:
-                    # Bloqueado por edificio o fuera de mapa
-                    self.wandering_step()
-        else:
-            self.wandering_step()
+                    self.path = []
 
 class PoliceCar(Car):
     """Patrulla checkpoints y persigue ChaoticCars."""
     def __init__(self, unique_id, model, destination=None, parking_limit=3, checkpoints=None):
         super().__init__(unique_id, model, destination, parking_limit)
-        # Si no se dan checkpoints, generar algunos aleatorios
         if checkpoints is None:
             self.checkpoints = []
         else:
@@ -362,17 +394,18 @@ class PoliceCar(Car):
         else:
             self.state = "PATROL"
             if not self.checkpoints:
-                self.wandering_step()
+                # Wandering logic
+                next_pos = self.get_wandering_move()
+                if next_pos:
+                    self.model.grid.move_agent(self, next_pos)
                 return
 
             target_pos = self.checkpoints[self.current_checkpoint_index]
             
-            # Si llegamos al checkpoint, siguiente
             if self.pos == target_pos:
                 self.current_checkpoint_index = (self.current_checkpoint_index + 1) % len(self.checkpoints)
                 target_pos = self.checkpoints[self.current_checkpoint_index]
             
-            # Ir al checkpoint
             try:
                 path = nx.shortest_path(self.model.G, self.pos, target_pos)
                 if len(path) > 1:
@@ -380,5 +413,4 @@ class PoliceCar(Car):
                     if self.can_move_to(next_pos):
                         self.model.grid.move_agent(self, next_pos)
             except (nx.NetworkXNoPath, nx.NodeNotFound):
-                # Si no puede llegar, saltar checkpoint
                 self.current_checkpoint_index = (self.current_checkpoint_index + 1) % len(self.checkpoints)
