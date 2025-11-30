@@ -33,184 +33,45 @@ city_map = [
     ">>>>>>>S>>>>>>>S>>>>>>^^"   
 ]
 
-class Car(Agent):
-    """Agente que representa un vehículo en la simulación."""
-    
-    def __init__(self, unique_id, model, destination=None):
-        super().__init__(unique_id, model)
-        self.destination = destination  # Coordenada (x, y) del destino
-        self.path = []  # Lista de coordenadas para seguir
-        self.parking_time = 0  # Contador para tiempo en estacionamiento
-        self.patience = 5 # Paciencia para recalcular ruta si se atasca
-        
-    def step(self):
-        """Ejecuta un paso de movimiento del vehículo."""
-        # Si estamos en el destino, esperar y luego desaparecer
-        if self.pos == self.destination:
-            self.parking_time += 1
-            if self.parking_time > 3:
-                # Liberar destino y eliminar agente
-                if self.destination in self.model.occupied_destinations:
-                    self.model.occupied_destinations.remove(self.destination)
-                self.model.grid.remove_agent(self)
-                self.model.schedule.remove(self)
-            return
-        
-        # Si no tenemos ruta, calcularla
-        if not self.path and self.destination:
-            self.calculate_path()
-        
-        # Intentar moverse
-        if self.path:
-            next_pos = self.path[0]
-            can_move = self.can_move_to(next_pos)
-            
-            if can_move:
-                self.model.grid.move_agent(self, next_pos)
-                self.path.pop(0)
-                self.patience = 5 # Reset patience on move
-            else:
-                # Si no puede moverse, decrementar paciencia
-                self.patience -= 1
-                if self.patience <= 0:
-                    # Paciencia agotada: intentar recalcular ruta (back-off)
-                    self.calculate_path()
-                    self.patience = 5 # Reset patience after recalc
-    
-    def calculate_path(self):
-        """Calcula el camino más corto usando A* en el grafo de NetworkX."""
-        if self.destination and self.pos in self.model.G and self.destination in self.model.G:
-            try:
-                self.path = nx.shortest_path(self.model.G, self.pos, self.destination)
-                self.path.pop(0)  # Remover posición actual
-            except nx.NetworkXNoPath:
-                # No hay ruta posible - eliminar agente para evitar bloqueos
-                # print(f"Car {self.unique_id} removed: No Path from {self.pos} to {self.destination}")
-                self.model.grid.remove_agent(self)
-                self.model.schedule.remove(self)
-                self.path = []
-    
-    def can_move_to(self, pos):
-        """Verifica si el coche puede moverse a la posición dada."""
-        cell_contents = self.model.grid.get_cell_list_contents([pos])
-        
-        # No puede moverse si hay otro coche
-        for agent in cell_contents:
-            if isinstance(agent, Car):
-                return False
-            
-            # Lógica estricta de semáforos
-            if isinstance(agent, TrafficLight):
-                # Detectar eje de movimiento real
-                dx = pos[0] - self.pos[0]
-                dy = pos[1] - self.pos[1]
-                moving_vertically = (dy != 0)
-                moving_horizontally = (dx != 0)
-                
-                if agent.direction == "NS":
-                    if agent.state == "Green":
-                        # NS pasa, EW espera
-                        if moving_horizontally: return False
-                    else:
-                        # Red/Yellow: NS espera, EW pasa
-                        if moving_vertically: return False
-                        
-                elif agent.direction == "EW":
-                    if agent.state == "Green":
-                        # EW pasa, NS espera
-                        if moving_vertically: return False
-                    else:
-                        # Red/Yellow: EW espera, NS pasa
-                        if moving_horizontally: return False
-                
-                return True # Si no bloquea, permite (el semáforo es pasable)
-        
-        return True
-
-
-class TrafficLight(Agent):
-    """Agente que representa un semáforo con 3 estados: Green, Yellow, Red."""
-    
-    def __init__(self, unique_id, model, direction="NS", state="Green", time_offset=0):
-        super().__init__(unique_id, model)
-        self.direction = direction  # "NS" (Norte-Sur) o "EW" (Este-Oeste)
-        self.state = state
-        self.timer = 10 - time_offset if state == "Green" else 10 # Ajuste simple
-        
-        # Tiempos por estado
-        self.green_time = 10
-        self.yellow_time = 3
-        self.red_time = 10
-        
-    def step(self):
-        """Cambia el estado del semáforo según el timer."""
-        self.timer -= 1
-        
-        if self.timer <= 0:
-            # Cambiar de estado cíclicamente
-            if self.state == "Green":
-                self.state = "Yellow"
-                self.timer = self.yellow_time
-            elif self.state == "Yellow":
-                self.state = "Red"
-                self.timer = self.red_time
-            elif self.state == "Red":
-                self.state = "Green"
-                self.timer = self.green_time
-
-
-class Obstacle(Agent):
-    """Agente que representa un edificio u obstáculo estático."""
-    
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-    
-    def step(self):
-        """Los obstáculos no tienen lógica de paso."""
-        pass
-
-
-class Destination(Agent):
-    """Agente que representa un destino/estacionamiento."""
-    
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-    
-    def step(self):
-        """Los destinos no tienen lógica de paso."""
-        pass
+from agents import Car, TrafficLight, Obstacle, Destination, ChaoticCar, PoliceCar
 
 
 class CityModel(Model):
     """Modelo de la ciudad con tráfico urbano."""
     
-    def __init__(self, pre_spawn=0, width=24, height=24):
+    def __init__(self, width=24, height=24, num_cars=10, parking_time=3, num_police=2, num_chaotic=2):
         super().__init__()
-        self.grid = MultiGrid(width, height, torus=False)  # NO TOROIDAL
-        self.schedule = RandomActivation(self)
-        
-        # Grafo dirigido para navegación
-        self.G = nx.DiGraph()
-        
-        # Listas para trackear agentes
-        self.destinations = []
-        self.occupied_destinations = set()  # Track de estacionamientos ocupados
-        
-        # Timer para prevenir teletransportación
+        self.width = width
+        self.height = height
+        self.num_cars = num_cars
+        self.num_police = num_police
+        self.num_chaotic = num_chaotic
+        self.parking_time = parking_time
         self.spawn_timer = 0
         
-        # Inicializar el mapa
-        self.setup_map()
+        self.schedule = RandomActivation(self)
+        self.grid = MultiGrid(width, height, torus=False)
+        self.G = nx.DiGraph()
+        self.destinations = []
         
-        # Crear el grafo de navegación
+        # 1. Crear el mapa y el grafo
+        self.setup_map()
         self.setup_graph()
         
+        # 2. Spawnear agentes iniciales
+        # Primero Policías
+        for _ in range(self.num_police):
+            self.spawn_car(agent_type=PoliceCar)
+            
+        # Luego Caóticos
+        for _ in range(self.num_chaotic):
+            self.spawn_car(agent_type=ChaoticCar)
+            
+        # Finalmente Coches Normales
+        for _ in range(self.num_cars):
+            self.spawn_car(agent_type=Car)
+            
         self.running = True # Required for Mesa visualization
-        
-        # Spawn inicial - 13 carros únicos
-        while len([a for a in self.schedule.agents if isinstance(a, Car)]) < 13:
-            if not self.spawn_car():
-                break # Parar si no hay espacio o destinos
     
     def setup_map(self):
         """Lee city_map y coloca los agentes correspondientes en la grilla."""
@@ -307,7 +168,7 @@ class CityModel(Model):
                     destination = Destination(self.next_id(), self)
                     self.grid.place_agent(destination, (x, y))
                     self.schedule.add(destination)
-                    self.destinations.append((x, y))
+                    self.destinations.append(destination) # Guardar agente, no pos
     
     def setup_graph(self):
         """Crea un grafo dirigido estricto basado en las flechas y reglas de tránsito."""
@@ -433,51 +294,32 @@ class CityModel(Model):
                         can_connect = False
 
                     if can_connect:
-                        self.G.add_edge((x, y), (nx_x, nx_y))
+                        # SISTEMA DE PESOS: Asignar costo según tipo de movimiento
+                        weight = 1  # Default
+                        
+                        if reason == "Forward":
+                            weight = 1  # Preferencia máxima
+                        elif reason == "Turn":
+                            weight = 2  # Penalización moderada
+                        elif reason == "LaneChange":
+                            weight = 5  # Penalización alta (evita zig-zag)
+                        elif reason in ["ToIntersection", "FromIntersection", "IntersectionLink"]:
+                            weight = 1  # Sin penalización
+                        
+                        # PROTECCIÓN DE ESTACIONAMIENTOS: Si el destino es 'D', peso altísimo
+                        if neighbor_cell == 'D':
+                            weight = 100  # Evita usar parkings como atajos
+                        
+                        self.G.add_edge((x, y), (nx_x, nx_y), weight=weight)
     
-    def spawn_car(self, start_pos=None, destination=None):
+    def spawn_car(self, start_pos=None, agent_type=Car):
         """Genera un nuevo coche en la simulación."""
         if start_pos is None:
             start_pos = self.get_random_spawn_point()
         
-        # Seleccionar destino no ocupado CON DISTANCIA MÍNIMA
-        if destination is None:
-            available_destinations = [d for d in self.destinations if d not in self.occupied_destinations]
-            if not available_destinations:
-                return None
-            
-            # Intentar encontrar un destino con distancia mínima de 10 celdas
-            max_attempts = 20
-            for _ in range(max_attempts):
-                candidate = random.choice(available_destinations)
-                
-                # Calcular distancia Manhattan considerando toroide
-                dx = abs(candidate[0] - start_pos[0])
-                dy = abs(candidate[1] - start_pos[1])
-                dx = min(dx, self.grid.width - dx)
-                dy = min(dy, self.grid.height - dy)
-                manhattan_dist = dx + dy
-                
-                if manhattan_dist >= 10:
-                    # Verificar si existe ruta en el grafo
-                    if nx.has_path(self.G, start_pos, candidate):
-                        destination = candidate
-                        break
-            else:
-                # Si falla el intento de distancia, buscar cualquiera válido
-                random.shuffle(available_destinations)
-                for d in available_destinations:
-                    if nx.has_path(self.G, start_pos, d):
-                        destination = d
-                        break
-        
-        if destination is None:
-            return None # No se encontró destino válido
-        
-        # Marcar destino como ocupado
-        self.occupied_destinations.add(destination)
-        
-        car = Car(self.next_id(), self, destination)
+        # Crear coche SIN destino inicial (lo buscará él mismo)
+        # Nota: PoliceCar y ChaoticCar heredan de Car, así que esto funciona
+        car = agent_type(self.next_id(), self, destination=None, parking_limit=self.parking_time)
         self.grid.place_agent(car, start_pos)
         self.schedule.add(car)
         return car
@@ -499,14 +341,34 @@ class CityModel(Model):
         """Ejecuta un paso de la simulación."""
         self.schedule.step()
         
-        # Dinámica de Población: Mantener ~13 coches
-        car_count = len([a for a in self.schedule.agents if isinstance(a, Car)])
+        # Dinámica de Población: Mantener counts de cada tipo
+        # Contar agentes actuales
+        current_cars = 0
+        current_police = 0
+        current_chaotic = 0
         
-        if car_count < 13:
-            self.spawn_timer += 1
-            if self.spawn_timer >= 2: # Intentar cada 2 ticks
-                self.spawn_timer = 0
-                self.spawn_car()
+        for agent in self.schedule.agents:
+            if isinstance(agent, PoliceCar):
+                current_police += 1
+            elif isinstance(agent, ChaoticCar):
+                current_chaotic += 1
+            elif isinstance(agent, Car): # Car normal (excluyendo subclases si isinstance checkea herencia)
+                # Ojo: isinstance(PoliceCar(), Car) es True.
+                # Necesitamos checar tipo exacto para 'Car' normal
+                if type(agent) == Car:
+                    current_cars += 1
+        
+        self.spawn_timer += 1
+        if self.spawn_timer >= 2: # Intentar cada 2 ticks
+            self.spawn_timer = 0
+            
+            # Prioridad de respawn: Policía > Caótico > Normal
+            if current_police < self.num_police:
+                self.spawn_car(agent_type=PoliceCar)
+            elif current_chaotic < self.num_chaotic:
+                self.spawn_car(agent_type=ChaoticCar)
+            elif current_cars < self.num_cars:
+                self.spawn_car(agent_type=Car)
         
     def serialize_grid(self):
         """Serializa el grid para Unity con información detallada."""
@@ -519,7 +381,8 @@ class CityModel(Model):
                     "y": y,
                     "agent_type": type(agent).__name__,
                     "state": None,
-                    "direction": None
+                    "direction": None,
+                    "state_code": 0 # Default state code
                 }
                 
                 # Agregar información específica por tipo
@@ -527,7 +390,25 @@ class CityModel(Model):
                     agent_data["state"] = agent.state
                     agent_data["direction"] = agent.direction
                 elif isinstance(agent, Car):
-                    agent_data["state"] = "Moving"
+                    agent_data["state"] = agent.state
+                    # Asignar códigos de estado para Unity
+                    if isinstance(agent, ChaoticCar):
+                         agent_data["state_code"] = 2 if agent.state == "CRASHED" else 0 # 0=Normal/Chaos, 2=Crashed
+                    elif isinstance(agent, PoliceCar):
+                         if agent.state == "PATROL": agent_data["state_code"] = 3
+                         elif agent.state == "CHASE": agent_data["state_code"] = 4
+                    else:
+                         if agent.state == "DRIVING": agent_data["state_code"] = 0
+                         elif agent.state == "WANDERING": agent_data["state_code"] = 1
+                         elif agent.state == "CRASHED": agent_data["state_code"] = 2
+
+                elif isinstance(agent, Destination):
+                    if agent.occupant is not None:
+                        agent_data["state"] = "Occupied"
+                    elif agent.reserved_by is not None:
+                        agent_data["state"] = "Reserved"
+                    else:
+                        agent_data["state"] = "Free"
                 
                 data.append(agent_data)
         

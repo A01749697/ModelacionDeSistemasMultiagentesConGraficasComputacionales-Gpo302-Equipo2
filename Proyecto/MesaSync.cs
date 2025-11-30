@@ -3,6 +3,7 @@ using NativeWebSocket;
 using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+
 public class MesaSync : MonoBehaviour
 {
     public static MesaSync Instance;
@@ -18,42 +19,57 @@ public class MesaSync : MonoBehaviour
     public Transform agentsRoot;
     public float stepInterval = 0.1f; // Tiempo entre pasos de simulación
     public float interpolationSpeed = 5f; // Velocidad de interpolación para movimiento suave
+
     [Header("Traffic Light Materials")]
     public Material greenLightMaterial;
     public Material yellowLightMaterial;
     public Material redLightMaterial;
+
+    [Header("Parking Materials")]
+    public Material parkingFreeMat;
+    public Material parkingReservedMat;
+    public Material parkingOccupiedMat;
+
     private Dictionary<int, GameObject> unityAgents = new Dictionary<int, GameObject>();
     private Dictionary<int, Vector3> targetPositions = new Dictionary<int, Vector3>();
     private float stepTimer = 0f;
+
     async void Awake()
     {
         Instance = this;
         websocket = new WebSocket("ws://localhost:8765");
+
         websocket.OnOpen += () =>
         {
             Debug.Log("Connected to Mesa WebSocket.");
         };
+
         websocket.OnMessage += (bytes) =>
         {
             var msg = System.Text.Encoding.UTF8.GetString(bytes);
             HandleMessage(msg);
         };
+
         websocket.OnError += (e) =>
         {
             Debug.LogError("WebSocket Error: " + e);
         };
+
         websocket.OnClose += (e) =>
         {
             Debug.Log(" WebSocket closed.");
         };
+
         await websocket.Connect();
     }
+
     private void HandleMessage(string msg)
     {
         // Ejecutamos esto en el hilo principal usando el Dispatcher
         UnityMainThreadDispatcher.Instance().Enqueue(() => {
             JObject data = JObject.Parse(msg);
             var type = (string)data["type"];
+
             if (type == "update")
             {
                 var agents = (JArray)data["agents"];
@@ -61,6 +77,7 @@ public class MesaSync : MonoBehaviour
             }
         });
     }
+
     private void ApplyMesaState(JArray agents)
     {
         // Marcamos los agentes vistos en esta actualización
@@ -76,6 +93,7 @@ public class MesaSync : MonoBehaviour
             string direction = a["direction"]?.ToString();
             
             seen.Add(id);
+
             // Crear agente si no existe
             if (!unityAgents.ContainsKey(id))
             {
@@ -94,7 +112,7 @@ public class MesaSync : MonoBehaviour
                     go.transform.localPosition = new Vector3(x, 0f, y);
                     targetPositions[id] = new Vector3(x, 0f, y);
                     
-                    Debug.Log($"reated {agentType} with ID {id} at ({x}, {y})");
+                    Debug.Log($"Created {agentType} with ID {id} at ({x}, {y})");
                 }
             }
             else
@@ -102,6 +120,7 @@ public class MesaSync : MonoBehaviour
                 // Actualizar posición objetivo para interpolación
                 targetPositions[id] = new Vector3(x, 0f, y);
             }
+
             // Actualizar estado específico del tipo de agente
             if (agentType == "TrafficLight")
             {
@@ -111,7 +130,12 @@ public class MesaSync : MonoBehaviour
             {
                 UpdateCar(id, state);
             }
+            else if (agentType == "Destination")
+            {
+                UpdateDestination(id, state);
+            }
         }
+
         // Eliminamos agentes que ya no existen en Mesa
         List<int> toRemove = new List<int>();
         foreach (var kv in unityAgents)
@@ -128,6 +152,7 @@ public class MesaSync : MonoBehaviour
             targetPositions.Remove(id);
         }
     }
+
     private GameObject GetPrefabForType(string agentType)
     {
         switch (agentType)
@@ -145,6 +170,7 @@ public class MesaSync : MonoBehaviour
                 return carPrefab; // Fallback
         }
     }
+
     private void UpdateTrafficLight(int id, string state, string direction)
     {
         if (!unityAgents.ContainsKey(id)) return;
@@ -167,6 +193,7 @@ public class MesaSync : MonoBehaviour
                     break;
             }
         }
+
         // Rotar según dirección (opcional)
         if (direction == "NS")
         {
@@ -177,21 +204,35 @@ public class MesaSync : MonoBehaviour
             lightGO.transform.localRotation = Quaternion.Euler(0, 90, 0);
         }
     }
+
     private void UpdateCar(int id, string state)
     {
         if (!unityAgents.ContainsKey(id)) return;
         // Aquí puedes añadir lógica adicional para coches
         // Por ejemplo, cambiar animaciones si el coche está en movimiento
-        GameObject carGO = unityAgents[id];
-        
-        // Podrías añadir un componente de animación o efectos visuales
-        // basados en el estado "Moving"
     }
+
+    private void UpdateDestination(int id, string state)
+    {
+        if (!unityAgents.ContainsKey(id)) return;
+        GameObject go = unityAgents[id];
+        Renderer r = go.GetComponent<Renderer>();
+        if (r == null) return;
+
+        switch (state)
+        {
+            case "Free": r.material = parkingFreeMat; break;
+            case "Reserved": r.material = parkingReservedMat; break;
+            case "Occupied": r.material = parkingOccupiedMat; break;
+        }
+    }
+
     void Update()
     {
         // Despachar mensajes del WebSocket
         if (websocket != null)
             websocket.DispatchMessageQueue();
+
         // Temporizador para enviar comandos de step
         stepTimer += Time.deltaTime;
         if (stepTimer >= stepInterval)
@@ -199,9 +240,11 @@ public class MesaSync : MonoBehaviour
             stepTimer = 0f;
             SendStepCommand();
         }
+
         // Interpolación suave de posiciones
         InterpolateAgentPositions();
     }
+
     private void InterpolateAgentPositions()
     {
         foreach (var kv in unityAgents)
@@ -219,20 +262,24 @@ public class MesaSync : MonoBehaviour
             }
         }
     }
+
     private async void SendStepCommand()
     {
         if (websocket == null || websocket.State != WebSocketState.Open)
             return;
+
         JObject payload = new JObject();
         payload["type"] = "step";
         string msg = payload.ToString();
         
         await websocket.SendText(msg);
     }
+
     public async Task SendSpawnCarCommand()
     {
         if (websocket == null || websocket.State != WebSocketState.Open)
             return;
+
         JObject payload = new JObject();
         payload["type"] = "spawn_car";
         string msg = payload.ToString();
@@ -240,6 +287,7 @@ public class MesaSync : MonoBehaviour
         await websocket.SendText(msg);
         Debug.Log("Spawn car command sent");
     }
+
     private async void OnApplicationQuit()
     {
         if (websocket != null)

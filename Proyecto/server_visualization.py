@@ -1,7 +1,21 @@
-from mesa.visualization.modules import CanvasGrid
+from mesa.visualization.modules import CanvasGrid, TextElement
 from mesa.visualization.ModularVisualization import ModularServer
+from mesa.visualization.UserParam import Slider
 
-from model import CityModel, Car, TrafficLight, Obstacle, Destination
+from model import CityModel
+from agents import Car, TrafficLight, Obstacle, Destination, ChaoticCar, PoliceCar
+
+class Legend(TextElement):
+    def render(self, model):
+        return """
+        <div style="color:black;background-color:white;padding:5px;border:1px solid black;margin-bottom:10px;">
+        <b>LEYENDA:</b><br>
+        🚙 Normal: 🔵 Viajando | 🟠 Buscando | ⚪ Chocado<br>
+        😈 Caótico: 🟣 (Ignora semáforos)<br>
+        🚓 Policía: ⚫ Patrullando | 🔴🔵 Persecución (Sirena)<br>
+        🅿️ Parking: 🟢 Libre | 🟡 Reservado | 🔴 Ocupado
+        </div>
+        """
 
 def agent_portrayal(agent):
     """
@@ -20,11 +34,32 @@ def agent_portrayal(agent):
 
     if isinstance(agent, Car):
         portrayal["Shape"] = "circle"
-        portrayal["Color"] = "red"
         portrayal["r"] = 0.5
         portrayal["Layer"] = 1
         portrayal["text"] = str(agent.unique_id)
         portrayal["text_color"] = "white"
+
+        # Colores dinámicos para Car
+        if isinstance(agent, ChaoticCar):
+            if agent.state == "CRASHED":
+                portrayal["Color"] = "black"
+            else:
+                portrayal["Color"] = "purple"
+        elif isinstance(agent, PoliceCar):
+            if agent.state == "CHASE":
+                # Efecto Sirena: Parpadeo Rojo/Azul
+                portrayal["Color"] = "red" if agent.model.schedule.steps % 2 == 0 else "blue"
+            else:
+                portrayal["Color"] = "black" # Patrulla discreta
+        else: # Car normal
+            if agent.state == "DRIVING":
+                portrayal["Color"] = "blue"
+            elif agent.state == "WANDERING":
+                portrayal["Color"] = "orange"
+            elif agent.state == "CRASHED":
+                portrayal["Color"] = "grey"
+            else:
+                portrayal["Color"] = "blue"
 
     elif isinstance(agent, TrafficLight):
         portrayal["Shape"] = "circle"
@@ -43,10 +78,16 @@ def agent_portrayal(agent):
 
     elif isinstance(agent, Destination):
         portrayal["Shape"] = "rect"
-        portrayal["Color"] = "blue"
         portrayal["w"] = 1
         portrayal["h"] = 1
         portrayal["Layer"] = 0
+        
+        if agent.occupant is not None:
+            portrayal["Color"] = "red"
+        elif agent.reserved_by is not None:
+            portrayal["Color"] = "yellow"
+        else:
+            portrayal["Color"] = "green"
         
     return portrayal
 
@@ -56,13 +97,21 @@ width = 24
 height = 24
 pixel_ratio = 20  # Pixeles por celda
 grid = CanvasGrid(agent_portrayal, width, height, width * pixel_ratio, height * pixel_ratio)
+legend = Legend()
 
 # Configuración del servidor
 server = ModularServer(
     CityModel,
-    [grid],
+    [grid, legend],
     "Traffic Simulation",
-    {"width": width, "height": height}
+    {
+        "width": width, 
+        "height": height,
+        "num_cars": Slider("Number of Cars", 13, 1, 30, 1),
+        "num_police": Slider("Number of Police", 2, 0, 10, 1),
+        "num_chaotic": Slider("Number of Chaotic", 2, 0, 10, 1),
+        "parking_time": Slider("Parking Time", 3, 1, 20, 1)
+    }
 )
 
 server.port = 8521 # Puerto por defecto

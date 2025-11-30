@@ -24,22 +24,6 @@ async def process_message(message: str):
         return
     msg_type = data.get("type", "")
     
-    if msg_type == "step":
-        # Ejecutar un paso de la simulación
-        model.step()
-        print(f"✓ Paso de simulación ejecutado")
-        # Nota: El estado actualizado se enviará automáticamente en handler()
-        
-    elif msg_type == "spawn_car":
-        # Generar un nuevo coche
-        car = model.spawn_car()
-        print(f"✓ Coche {car.unique_id} generado en {car.pos}")
-async def broadcast_state():
-    """Envía el estado de todos los agentes a Unity.
-    
-    Formato JSON enviado:
-    {
-        "type": "update",
         "agents": [
             {
                 "id": 1,
@@ -52,7 +36,7 @@ async def broadcast_state():
             ...
         ]
     }
-    """
+ 
     if not connected:
         return
         
@@ -68,13 +52,16 @@ async def broadcast_state():
     await asyncio.gather(*[ws.send(msg) for ws in connected])
     print(f" Estado enviado a Unity: {len(agents_data)} agentes")
 async def handler(ws):
-    """Maneja la conexión de un cliente (Unity).
+
+    """
+    '''Maneja la conexión de un cliente (Unity).
     
     Flujo de simulación paso a paso:
     1. Unity se conecta → Se envía estado inicial
     2. Unity envía {'type': 'step'} → model.step() se ejecuta → Estado actualizado se envía
     3. Unity recibe {'type': 'update', 'agents': [...]} con todos los agentes y sus estados
     """
+    
     print("🎮 Unity conectado")
     connected.add(ws)
     try:
