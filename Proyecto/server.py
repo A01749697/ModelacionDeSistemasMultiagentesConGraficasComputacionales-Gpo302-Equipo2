@@ -3,27 +3,23 @@ import asyncio
 import websockets
 import json
 from model import CityModel
+
 MODEL_WIDTH = 24
 MODEL_HEIGHT = 24
 WS_HOST = "localhost"
 WS_PORT = 8765
+
 # Instanciamos el modelo de la ciudad
 model = CityModel(width=MODEL_WIDTH, height=MODEL_HEIGHT)
 connected = set()
-async def process_message(message: str):
-    """Procesa mensajes JSON desde Unity.
+
+
+async def broadcast_state():
+    """Envía el estado actual del modelo a todos los clientes conectados.
     
-    Simulación paso a paso controlada por el cliente:
-    - Unity envía {'type': 'step'} para avanzar la simulación
-    - El servidor ejecuta model.step() y responde automáticamente con el estado actualizado
-    """
-    try:
-        data = json.loads(message)
-    except Exception as e:
-        print("Error parseando JSON:", e)
-        return
-    msg_type = data.get("type", "")
-    
+    Formato del mensaje:
+    {
+        "type": "update",
         "agents": [
             {
                 "id": 1,
@@ -36,7 +32,7 @@ async def process_message(message: str):
             ...
         ]
     }
- 
+    """
     if not connected:
         return
         
@@ -50,23 +46,46 @@ async def process_message(message: str):
     # Enviar a todos los clientes conectados
     # websockets 10+ maneja el broadcast de forma eficiente
     await asyncio.gather(*[ws.send(msg) for ws in connected])
-    print(f" Estado enviado a Unity: {len(agents_data)} agentes")
-async def handler(ws):
+    print(f"➡️ Estado enviado a Unity: {len(agents_data)} agentes")
 
+
+async def process_message(message: str):
+    """Procesa mensajes JSON desde Unity.
+    
+    Simulación paso a paso controlada por el cliente:
+    - Unity envía {'type': 'step'} para avanzar la simulación
+    - El servidor ejecuta model.step() y responde automáticamente con el estado actualizado
     """
-    '''Maneja la conexión de un cliente (Unity).
+    try:
+        data = json.loads(message)
+    except Exception as e:
+        print("Error parseando JSON:", e)
+        return
+    
+    msg_type = data.get("type", "")
+    
+    if msg_type == "step":
+        # Ejecutar un paso de la simulación
+        print("⚙️ Ejecutando model.step()...")
+        model.step()
+        print(f"✅ Step completado. Cars activos: {len([a for a in model.grid.get_all_cell_contents() if type(a).__name__ == 'Car'])}")
+    else:
+        print(f"⚠️ Tipo de mensaje desconocido: {msg_type}")
+
+
+async def handler(ws):
+    """Maneja la conexión de un cliente (Unity).
     
     Flujo de simulación paso a paso:
     1. Unity se conecta → Se envía estado inicial
     2. Unity envía {'type': 'step'} → model.step() se ejecuta → Estado actualizado se envía
     3. Unity recibe {'type': 'update', 'agents': [...]} con todos los agentes y sus estados
     """
-    
     print("🎮 Unity conectado")
     connected.add(ws)
     try:
         # Enviar estado inicial al conectar
-        print(" Enviando estado inicial...")
+        print("📤 Enviando estado inicial...")
         await broadcast_state()
         
         # Procesar mensajes de Unity
@@ -76,19 +95,23 @@ async def handler(ws):
             await broadcast_state()
             
     except websockets.ConnectionClosed:
-        print("Unity desconectado")
+        print("🔌 Unity desconectado")
     finally:
         connected.remove(ws)
+
+
 async def main():
     async with websockets.serve(handler, WS_HOST, WS_PORT):
-        print(f"Servidor Mesa corriendo en ws://{WS_HOST}:{WS_PORT}")
-        print(f"Modelo inicializado: {MODEL_WIDTH}x{MODEL_HEIGHT}")
-        print(f"Grafo: {len(model.G.nodes)} nodos, {len(model.G.edges)} aristas")
-        print(f"Destinos: {len(model.destinations)}")
-        print("Esperando conexión de Unity...")
+        print(f"🚀 Servidor Mesa corriendo en ws://{WS_HOST}:{WS_PORT}")
+        print(f"📊 Modelo inicializado: {MODEL_WIDTH}x{MODEL_HEIGHT}")
+        print(f"🗺️ Grafo: {len(model.G.nodes)} nodos, {len(model.G.edges)} aristas")
+        print(f"🎯 Destinos: {len(model.destinations)}")
+        print("⏳ Esperando conexión de Unity...")
         await asyncio.Future()  # run forever
+
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n Servidor detenido.")
+        print("\n⛔ Servidor detenido.")
