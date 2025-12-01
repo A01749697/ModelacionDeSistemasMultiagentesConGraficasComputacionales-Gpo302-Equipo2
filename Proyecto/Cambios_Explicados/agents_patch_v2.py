@@ -16,29 +16,6 @@ Cambios Clave:
 from mesa import Agent
 import networkx as nx
 import random
-from collections import deque
-
-
-def detect_stuck_pattern(car):
-    """Detecta si coche está atorado basado en historial."""
-    if len(car.position_history) < 3:
-        return False, "InsufficientData"
-    
-    recent_pos = list(car.position_history)[-3:]
-    
-    # Patrón 1: Mismo lugar 3 steps consecutivos
-    if recent_pos[0] == recent_pos[1] == recent_pos[2]:
-        return True, "STATIC_BLOCK"
-    
-    # Patrón 2: Ping-Pong (A → B → A)
-    if recent_pos[0] == recent_pos[2] and recent_pos[0] != recent_pos[1]:
-        return True, "PING_PONG"
-    
-    # Patrón 3: Stuck_counter alto
-    if car.stuck_counter > 5:
-        return True, "HIGH_STUCK_COUNTER"
-    
-    return False, "OK"
 
 
 class Car(Agent):
@@ -57,36 +34,10 @@ class Car(Agent):
         # *** NUEVO: INERCIA DIRECCIONAL para evitar zig-zag ***
         self.last_move = None  # Tupla (dx, dy) o None
         
-        # TRACKING PARA DEBUGGING
-        self.position_history = deque(maxlen=10)  # Últimas 10 posiciones
-        self.stuck_counter = 0  # Contador de steps sin movimiento
-        self.decision_history = deque(maxlen=5)  # Últimas 5 decisiones
-        self.is_under_observation = False  # Flag para logging intensivo
-        
         self.debug = (unique_id == 0)
 
     def step(self):
         """Avanza un paso en la simulación con máquina de estados clara."""
-        
-        # [TRACK HISTORIAL DE POSICIONES]
-        self.position_history.append(self.pos)
-        
-        # Incrementar stuck_counter si no nos movemos
-        if len(self.position_history) >= 2:
-            prev_pos = list(self.position_history)[-2]
-            if self.pos == prev_pos:
-                self.stuck_counter += 1
-            else:
-                self.stuck_counter = 0  # Reset al moverse
-        
-        # CRITICAL FIX: Mantener last_move aunque no se mueva
-        # Esto es crucial para inercia cuando el coche está bloqueado
-        if self.last_move is None and len(self.position_history) >= 2:
-            prev_pos = list(self.position_history)[-2]
-            curr_pos = self.pos
-            recovered_move = (curr_pos[0] - prev_pos[0], curr_pos[1] - prev_pos[1])
-            if recovered_move != (0, 0):  # Solo si realmente se movió
-                self.last_move = recovered_move
         
         if self.debug:
             print(f"🚗 CAR {self.unique_id} | pos={self.pos}, dest={self.destination}, state={self.state}")
@@ -177,159 +128,77 @@ class Car(Agent):
                 self.last_move = (dx, dy)
                 
                 self.model.grid.move_agent(self, next_pos)
-                self.stuck_counter = 0  # [RESET COUNTER]
-            else:
-                # No se movió
-                self.stuck_counter += 1
-                if self.is_under_observation:
-                    print(f"   ⏸️  CAR {self.unique_id} didn't move. StuckCounter={self.stuck_counter}")
 
     def get_wandering_move(self):
         """
-        Decide el movimiento WANDERING con lógica estricta Anti-Reversa.
+        *** REFACTORIZADO CON INERCIA PROBLEMA 1 ***
         
-        NUEVA ESTRATEGIA (Anti-Ping-Pong):
-        1. Separar opciones en "adelante/lateral" vs "atrás" (U-turn)
-        2. Priorizar FUERTEMENTE continuar recto (weight * 0.1)
-        3. Solo permitir U-turn si es la única opción (callejón sin salida)
-        4. Si mejor opción tiene luz roja → ESPERAR (no dar vuelta en U)
+        Decide movimiento WANDERING evitando "baile" en semáforos.
+        NUEVA ESTRATEGIA:
+        1. Obtener vecinos y calcular pesos
+        2. REFORZAR último movimiento (weight *= 0.5 si es continuación)
+        3. Ordenar por peso ajustado
+        4. Si mejor opción tiene semáforo rojo → ESPERAR (return None)
+        5. Si mejor opción está libre → TOMAR
+        6. Si mejor está ocupada → intentar alternativas
+        7. Si todo está bloqueado → ESPERAR
         """
-        
-        # FIX CRÍTICO: Recuperar last_move del historial si es None
-        if self.last_move is None and len(self.position_history) >= 2:
-            # Calcular movimiento desde posición anterior
-            prev_pos = list(self.position_history)[-2]
-            curr_pos = self.pos
-            self.last_move = (curr_pos[0] - prev_pos[0], curr_pos[1] - prev_pos[1])
-            
-            # Solo mantener si es movimiento válido (no (0,0))
-            if self.last_move == (0, 0):
-                self.last_move = None
-            elif self.is_under_observation:
-                print(f"   🔧 RECOVERED last_move from history: {self.last_move}")
-        
-        # [LOGGING ENTRADA]
-        step_num = self.model.schedule.steps
-        is_stuck, stuck_reason = detect_stuck_pattern(self)
-        
-        if is_stuck:
-            self.is_under_observation = True
-            print(f"\n🚨 STUCK DETECTION: Car {self.unique_id}")
-            print(f"   Step: {step_num}, Pos: {self.pos}")
-            print(f"   Reason: {stuck_reason}")
-            print(f"   LastMove: {self.last_move}")
-            print(f"   Destination: {self.destination}")
-            print(f"   State: {self.state}")
         
         neighbors = self.model.grid.get_neighborhood(
             self.pos, moore=False, include_center=False
         )
-        
-        # Listas separadas para priorizar
-        forward_options = []  # Opciones que NO son reversa
-        backward_options = [] # Opción de volver por donde vine
-        
-        # Calcular vector de reversa (lo opuesto a mi último movimiento)
-        backward_direction = None
-        if self.last_move:
-            backward_direction = (-self.last_move[0], -self.last_move[1])
+        valid_options = []
 
+        # Obtener vecinos conectados en el grafo
         for n in neighbors:
-            # Validar conectividad del grafo y semáforos
             if self.model.G.has_edge(self.pos, n):
                 weight = self.model.G.edges[self.pos, n]['weight']
                 dx = n[0] - self.pos[0]
                 dy = n[1] - self.pos[1]
                 direction = (dx, dy)
-                
-                # Inercia: Bonificar fuertemente seguir recto
-                if self.last_move and direction == self.last_move:
-                    weight *= 0.1  # Bonificación masiva (antes 0.5)
-                
-                # [LOGGING DETALLE DE VECINO]
-                if self.is_under_observation:
-                    light_ok = self.can_pass_traffic_light(n)
-                    move_ok = self.can_move_to(n)
-                    
-                    # Obtener estado del semáforo si existe
-                    light_status = "No Light"
-                    cell_contents = self.model.grid.get_cell_list_contents([n])
-                    for agent in cell_contents:
-                        if isinstance(agent, TrafficLight):
-                            light_status = f"{agent.state} ({agent.direction})"
-                            break
-                    
-                    print(f"   → Neighbor {n}:")
-                    print(f"     Weight: {weight:.1f} (direction={direction})")
-                    print(f"     LightOK: {light_ok}, MoveOK: {move_ok}")
-                    print(f"     LightStatus: {light_status}")
-                    
-                    # Si MoveOK es False, mostrar por qué
-                    if not move_ok:
-                        occupants = [type(a).__name__ for a in cell_contents]
-                        print(f"     Occupants: {occupants}")
-                
-                # Clasificar opción
-                option = (n, weight, direction)
-                
-                if backward_direction and direction == backward_direction:
-                    backward_options.append(option)
+                valid_options.append((n, weight, direction))
+
+        # *** INERCIA: Reforzar si es continuación del movimiento anterior ***
+        if self.last_move:
+            adjusted_options = []
+            for pos, weight, direction in valid_options:
+                # Si es continuación (mismo vector), reducir peso en 50%
+                if direction == self.last_move:
+                    adjusted_weight = weight * 0.5  # PREFERENCIA de inercia
                 else:
-                    forward_options.append(option)
+                    adjusted_weight = weight
+                adjusted_options.append((pos, adjusted_weight, direction))
+            valid_options = adjusted_options
 
-        # EMERGENCIA: Si muy atorado, forzar decisión
-        if self.stuck_counter > 15:
-            print(f"\n🚨 EMERGENCY ESCAPE: Car {self.unique_id} forcing move after {self.stuck_counter} stuck steps")
-            
-            # Opción 1: Intentar U-turn forzado
-            if backward_options:
-                print(f"   → Taking emergency U-turn to {backward_options[0][0]}")
-                return backward_options[0][0]
-            
-            # Opción 2: Resetear inercia y recalcular
+        # Ordenar por peso ajustado
+        valid_options.sort(key=lambda x: x[1])
+
+        if not valid_options:
             self.last_move = None
-            self.stuck_counter = 0
-            print(f"   → Resetting inercia for next step")
-            return None  # Re-evaluar próximo step sin inercia
+            return None
 
-        # 1. Intentar moverse hacia adelante/lados primero
-        # Ordenar por peso
-        forward_options.sort(key=lambda x: x[1])
-        
-        # [LOGGING DECISION]
-        if self.is_under_observation:
-            print(f"   ✅ DECISION: Trying options in order...")
-        
-        for pos, weight, direction in forward_options:
-            # Si semáforo ROJO en mi mejor opción, ESPERAR (no dar vuelta en U)
-            if not self.can_pass_traffic_light(pos):
-                if self.is_under_observation:
-                    print(f"   ❌ STUCK: No valid move found. Red light blocks best option.")
-                    print("")
-                return None 
-                
-            if self.can_move_to(pos):
-                if self.is_under_observation:
-                    print(f"   ✅ MOVING: To {pos}")
-                    print("")
-                return pos
-        
-        # 2. Si no hay opciones adelante (callejón sin salida o bloqueado por coches)
-        # Solo entonces consideramos volver atrás
-        if not forward_options and backward_options:
-            back_pos = backward_options[0][0]
-            if self.can_pass_traffic_light(back_pos) and self.can_move_to(back_pos):
-                if self.is_under_observation:
-                    print(f"   ⚠️ U-TURN: No forward options, taking U-turn to {back_pos}")
-                    print("")
-                return back_pos
+        # Evaluar primera opción (mejor según peso)
+        best_pos, best_weight, best_direction = valid_options[0]
 
-        # 3. Si todo falla (bloqueado total)
-        # [LOGGING FALLBACK]
-        if self.is_under_observation:
-            print(f"   ❌ STUCK: No valid move found. All options blocked/red.")
-            print("")
-        
+        # *** CLAVE: Si semáforo ROJO/AMARILLO bloquea la mejor opción, ESPERAR ***
+        if not self.can_pass_traffic_light(best_pos):
+            if self.debug:
+                print(f"🛑 CAR {self.unique_id} WAITING at red light (inercia={self.last_move})")
+            return None  # NO BAILAR - solo esperar
+
+        # Si recto está disponible (semáforo verde y sin coches), tomar
+        if self.can_move_to(best_pos):
+            return best_pos
+
+        # Si mejor está ocupada por coche, intentar alternativas
+        for next_pos, next_weight, next_direction in valid_options[1:]:
+            if not self.can_pass_traffic_light(next_pos):
+                continue  # Semáforo rojo, saltar
+            
+            if self.can_move_to(next_pos):
+                return next_pos
+
+        # Completamente bloqueado
         return None
 
     def can_pass_traffic_light(self, pos):

@@ -1,0 +1,121 @@
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                 DEBUGGING SYSTEM - ARCHIVO MAESTRO                        ║
+║             Sistema Completo de Logging para Car Stalls                   ║
+║                        Tráfico Urbano v3.0                                ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+ARCHIVOS CREADOS (4 ARCHIVOS):
+═════════════════════════════════════════════════════════════════════════════
+
+1. DEBUGGING_QUICK_START.md ⭐⭐
+   ├─ Propósito: Quick reference / Cheat sheet
+   ├─ Contiene: 3 pasos esenciales + comandos
+   └─ Acción: Consulta cuando necesites ir rápido
+
+2. PROMPT_DEBUG_RIGOROUS.py ⭐
+   ├─ Propósito: Documentación técnica completa
+   ├─ Contiene: Arquitectura, diagnósticos, soluciones
+   └─ Acción: Lee si necesitas entender la lógica
+
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+POSIBLES DIAGNÓSTICOS:
+═════════════════════════════════════════════════════════════════════════════
+
+PATRÓN 1: PING-PONG (Oscilación)
+└─ Síntoma: Alterna entre pos A ↔ B por 5-10 steps
+└─ Causa: Anti-U-turn logic tiene agujero pequeño
+└─ Fix: Aumentar bonificación de inercia (0.05 en vez de 0.1)
+
+PATRÓN 2: BLOQUEO LEGÍTIMO
+└─ Síntoma: Todos los vecinos MoveOK=False
+└─ Causa: Congestión real (otros coches/obstáculos)
+└─ Fix: Esperar (es tráfico normal)
+
+PATRÓN 3: SEMÁFORO CONTRADICTORIO
+└─ Síntoma: LightOK=True pero LightStatus=Red
+└─ Causa: Bug en can_pass_traffic_light() (dirección NS/EW)
+└─ Fix: Revisar lógica de dirección
+
+PATRÓN 4: COCHE FANTASMA
+└─ Síntoma: MoveOK=False pero Occupants=[]
+└─ Causa: Bug en grid.get_cell_list_contents()
+└─ Fix: Debugear sincronización del grid
+
+═════════════════════════════════════════════════════════════════════════════
+
+COMANDOS DE BÚSQUEDA RÁPIDA:
+═════════════════════════════════════════════════════════════════════════════
+
+Ver dónde se atasca:
+$ grep "🚨 STUCK DETECTION" debug.log
+
+Contar cuántos atascos:
+$ grep "🚨 STUCK DETECTION" debug.log | wc -l
+
+Ver qué coches se atascan:
+$ grep "🚨 STUCK DETECTION" debug.log | grep -oP "Car \K[0-9]+" | sort | uniq -c
+
+Ver primeros 50 steps de contexto del atasco:
+$ grep -n "🚨 STUCK" debug.log | head -1
+# Dice algo como "1250:🚨", entonces:
+$ sed -n '1200,1300p' debug.log
+
+Ver si hay Emergency Escape:
+$ grep "EMERGENCY ESCAPE" debug.log | wc -l
+
+Crear archivo de contexto para análisis:
+$ sed -n '1200,1300p' debug.log > stuck_context.txt
+
+═════════════════════════════════════════════════════════════════════════════
+
+CHECKLIST PRE-EJECUCIÓN:
+═════════════════════════════════════════════════════════════════════════════
+
+IMPLEMENTACIÓN (30 minutos con agente):
+☐ Agente implementó FASE 1 (propiedades de tracking)
+☐ Agente implementó FASE 2 (función de detección)
+☐ Agente implementó FASE 3 (logging en get_wandering_move)
+☐ Agente implementó FASE 4 (tracking en step)
+☐ Agente implementó FASE 5 (emergency escape)
+☐ Agente implementó FASE 6 (validó compilación)
+
+VALIDACIÓN:
+☐ python -m py_compile agents.py (sin errores)
+☐ No hay cambios de LÓGICA, solo logging
+☐ Código sigue siendo correcto
+
+EJECUCIÓN:
+☐ python -u server_visualization.py 2>&1 | tee debug.log
+☐ Simulación se ejecuta sin crashes
+☐ Se ven prints normales + ataques cuando ocurren
+
+ANÁLISIS:
+☐ grep "🚨 STUCK DETECTION" debug.log (encontró atascos)
+☐ Contexto de 50 líneas alrededor del atasco
+☐ Identifiqué el PATRÓN (Ping-Pong / Bloqueo / etc.)
+
+═════════════════════════════════════════════════════════════════════════════
+
+
+PRÓXIMOS PASOS DESPUÉS DE LOGS:
+═════════════════════════════════════════════════════════════════════════════
+
+1. Proporciona output de:
+   • grep "🚨 STUCK DETECTION" debug.log | wc -l
+   • grep "🚨 STUCK DETECTION" debug.log | head -1
+   • sed -n '[context_lines]' debug.log
+
+2. Con eso identificaré el bug exacto
+
+3. Daré fix específico basado en patrón
+
+4. Tu agente implementará el fix
+
+5. Validaremos que se resuelve
+
+═════════════════════════════════════════════════════════════════════════════
+

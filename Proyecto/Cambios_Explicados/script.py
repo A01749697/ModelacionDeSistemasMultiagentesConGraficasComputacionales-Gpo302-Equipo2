@@ -1,0 +1,93 @@
+
+# Análisis del Problema 1: Indecisión en Intersecciones
+
+problema_1_analisis = """
+PROBLEMA 1: INDECISIÓN EN INTERSECCIONES (WANDERING)
+=====================================================
+
+SÍNTOMAS OBSERVADOS:
+- Coches cambian de carril innecesariamente en semáforos
+- Comportamiento confuso al llegar a intersecciones
+- Zig-zag ocasional en celdas de semáforos
+
+CAUSA RAÍZ:
+get_wandering_move() no tiene INERCIA direccional
+
+FLUJO ACTUAL (PROBLEMÁTICO):
+1. Car en posición (10,5)
+2. get_wandering_move() obtiene vecinos: [(10,6,w=1), (11,5,w=10), (9,5,w=10)]
+3. Ordena por peso: [(10,6,w=1), (11,5,w=10), (9,5,w=10)]
+4. Chequea (10,6):
+   - ¿Semáforo?: si YES → retorna None (ESPERA)
+   - si NO → avanza
+5. PERO: Si en step anterior llegó desde (10,4) → (10,5),
+   el coche debería PREFERIR (10,6) incluso si hay alternativas
+
+PROBLEMA:
+- Sin inercia, el coche es "demasiado flexible"
+- En cruces confusos, puede oscilar entre opciones
+- Especialmente problemático cuando hay 2-3 opciones con pesos similares
+
+SOLUCIÓN REQUERIDA:
+- Agregar self.last_move como memoria direccional
+- En get_wandering_move(), si last_move es hacia el frente,
+  reforzar esa dirección (multiplicar peso por 0.5)
+- Solo cambiar dirección si está completamente bloqueado
+"""
+
+problema_2_analisis = """
+PROBLEMA 2: COMPORTAMIENTO DE CHAOTICCAR
+==========================================
+
+SÍNTOMAS OBSERVADOS:
+- Zig-zag de lado a lado (behavior aleatorio)
+- Entran en sentido contrario (no respetan dirección de calle)
+- Se meten a estacionamientos
+- Buscan rutas cuando deberían vagar libremente
+
+CAUSA RAÍZ:
+ChaoticCar usa logic genérica de wandering (random.choice)
+
+CÓDIGO PROBLEMÁTICO ACTUAL:
+    if not self.destination:
+        neighbors = self.model.grid.get_neighborhood(...)
+        valid = [n for n in neighbors if self.can_move_to(n)]
+        if valid:
+            self.model.grid.move_agent(self, random.choice(valid))
+        return
+
+PROBLEMAS ESPECÍFICOS:
+1. random.choice(valid) → Cada frame elige ALEATORIAMENTE
+   En grid 4-vecinos: elige frente/izq/der con prob 33% cada uno
+   RESULTADO: El coche parece ebrio (zig-zag puro)
+
+2. Respeta dirección de calle (porque valida con Graph),
+   PERO sin inercia, es un zig-zag
+
+3. No intenta conseguir destino (BIEN),
+   PERO el movimiento es demasiado caótico
+
+4. Ocupa celdas de estacionamiento legalmente
+   (porque can_move_to chequea Destination)
+
+SOLUCIÓN REQUERIDA:
+- Agregar self.last_direction para Inercia
+- get_chaotic_move():
+  1. Preferir ir hacia last_direction (weight *= 0.3)
+  2. Solo girar si bloqueado completamente
+  3. Ignorar semáforos (como ya hace)
+  4. No buscar Destination nunca
+  5. NO entrar a Destination (bloquear en can_move_to específico)
+"""
+
+print(problema_1_analisis)
+print("\n" + "="*60 + "\n")
+print(problema_2_analisis)
+
+# Guardar análisis
+with open("problema_analisis.txt", "w") as f:
+    f.write(problema_1_analisis)
+    f.write("\n" + "="*60 + "\n")
+    f.write(problema_2_analisis)
+
+print("\n✅ Análisis completado")
