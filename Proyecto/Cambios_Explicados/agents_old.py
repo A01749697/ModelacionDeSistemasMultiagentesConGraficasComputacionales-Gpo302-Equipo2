@@ -1,16 +1,44 @@
 """
-AGENTS.PY - Refactorización Completa
-====================================
-Fixes implementados:
-- BUG A: Ciclo PARKED → release() → WANDERING sin desapariciones
-- BUG B: get_wandering_move() espera en semáforos en lugar de bailar
-- BUG C: Eliminación de stuck_counter y lógica de despawn
-- BUG D: Spawn mejorado con get_random_spawn_point()
+AGENTS.PY - PATCH 2: COMPORTAMIENTO REFINADO
+=============================================
+
+Correcciones Implementadas:
+- PROBLEMA 1: Indecisión en Intersecciones → Agregar INERCIA a get_wandering_move()
+- PROBLEMA 2: ChaoticCar Zig-Zag → Nuevo método get_chaotic_move() con INERCIA + bloqueo Destination
+
+Cambios Clave:
+1. Car.__init__() → Agregar self.last_move (vector direccional)
+2. Car.get_wandering_move() → REFACTORIZADO con inercia
+3. ChaoticCar.step() → COMPLETAMENTE REESCRITO con get_chaotic_move()
+4. ChaoticCar.can_move_to() → Agregar protección contra Destination
 """
 
 from mesa import Agent
 import networkx as nx
 import random
+from collections import deque
+
+
+def detect_stuck_pattern(car):
+    """Detecta si coche está atorado basado en historial."""
+    if len(car.position_history) < 3:
+        return False, "InsufficientData"
+    
+    recent_pos = list(car.position_history)[-3:]
+    
+    # Patrón 1: Mismo lugar 3 steps consecutivos
+    if recent_pos[0] == recent_pos[1] == recent_pos[2]:
+        return True, "STATIC_BLOCK"
+    
+    # Patrón 2: Ping-Pong (A → B → A)
+    if recent_pos[0] == recent_pos[2] and recent_pos[0] != recent_pos[1]:
+        return True, "PING_PONG"
+    
+    # Patrón 3: Stuck_counter alto
+    if car.stuck_counter > 5:
+        return True, "HIGH_STUCK_COUNTER"
+    
+    return False, "OK"
 
 
 class Car(Agent):
@@ -23,48 +51,77 @@ class Car(Agent):
         self.parking_timer = 0
         self.parking_limit = parking_limit
         self.path = []
-        self.patience = 3  # Intentos antes de recalcular ruta
-        self.do_not_park_here = None  # Evitar re-parking inmediato
+        self.patience = 3
+        self.do_not_park_here = None
         
-        # DIAGNÓSTICO
-        self.debug = (unique_id == 0)  # Solo agente 0 por defecto
+        # *** NUEVO: INERCIA DIRECCIONAL para evitar zig-zag ***
+        self.last_move = None  # Tupla (dx, dy) o None
+        
+        # TRACKING PARA DEBUGGING
+        self.position_history = deque(maxlen=10)  # Últimas 10 posiciones
+        self.stuck_counter = 0  # Contador de steps sin movimiento
+        self.decision_history = deque(maxlen=5)  # Últimas 5 decisiones
+        self.is_under_observation = False  # Flag para logging intensivo
+        
+        self.debug = (unique_id == 0)
 
     def step(self):
         """Avanza un paso en la simulación con máquina de estados clara."""
         
+        # [TRACK HISTORIAL DE POSICIONES]
+        self.position_history.append(self.pos)
+        
+        # Incrementar stuck_counter si no nos movemos
+        if len(self.position_history) >= 2:
+            prev_pos = list(self.position_history)[-2]
+            if self.pos == prev_pos:
+                self.stuck_counter += 1
+            else:
+                self.stuck_counter = 0  # Reset al moverse
+        
+        # CRITICAL FIX: Mantener last_move aunque no se mueva
+        # Esto es crucial para inercia cuando el coche está bloqueado
+        if self.last_move is None and len(self.position_history) >= 2:
+            prev_pos = list(self.position_history)[-2]
+            curr_pos = self.pos
+            recovered_move = (curr_pos[0] - prev_pos[0], curr_pos[1] - prev_pos[1])
+            if recovered_move != (0, 0):  # Solo si realmente se movió
+                self.last_move = recovered_move
+        
         if self.debug:
             print(f"🚗 CAR {self.unique_id} | pos={self.pos}, dest={self.destination}, state={self.state}")
 
-        # 1. ESTADO CRASHED - Inmóvil permanentemente
+        # 1. ESTADO CRASHED
         if self.state == "CRASHED":
             return
 
-        # 2. ESTADO PARKED - Temporizador hasta salida
+        # 2. ESTADO PARKED
         if self.state == "PARKED":
             self.parking_timer -= 1
             
             if self.parking_timer <= 0:
-                # *** FIX BUG A: Ciclo completo de liberación ***
                 if self.destination:
                     self.do_not_park_here = self.destination
-                    self.destination.release()  # Libera reserva Y ocupante
+                    self.destination.release()
                     self.destination = None
                 
                 self.state = "WANDERING"
-                self.path = []  # Limpiar ruta anterior
+                self.path = []
+                self.last_move = None  # Reset inercia al salir de parking
                 
                 if self.debug:
                     print(f"🚗 CAR {self.unique_id} EXITING PARKING → WANDERING")
             
-            return  # Permanece en posición hasta salir
+            return
 
-        # 3. ESTADO DRIVING - Navegación con destino
+        # 3. ESTADO DRIVING
         if self.destination:
             # 3.A. Llegada al destino
             if self.pos == self.destination.pos:
                 self.state = "PARKED"
                 self.parking_timer = self.parking_limit
                 self.destination.occupant = self
+                self.last_move = None  # Reset inercia
                 
                 if self.debug:
                     print(f"🚗 CAR {self.unique_id} ARRIVED at {self.destination.pos} → PARKED")
@@ -80,17 +137,21 @@ class Car(Agent):
                 next_pos = self.path[0]
                 
                 if self.can_move_to(next_pos):
+                    # Guardar movimiento para inercia
+                    dx = next_pos[0] - self.pos[0]
+                    dy = next_pos[1] - self.pos[1]
+                    self.last_move = (dx, dy)
+                    
                     self.model.grid.move_agent(self, next_pos)
                     self.path.pop(0)
                     self.patience = 3
                 else:
-                    # Paciencia: si estoy bloqueado, recalcular ruta después de N intentos
                     self.patience -= 1
                     if self.patience <= 0:
                         self.calculate_path()
                         self.patience = 3
 
-        # 4. ESTADO WANDERING - Búsqueda de destino
+        # 4. ESTADO WANDERING
         else:
             # 4.A. Intentar negociar destino
             if self.debug:
@@ -105,71 +166,176 @@ class Car(Agent):
                 self.calculate_path()
                 return
 
-            # 4.C. Si no encontró, vagar aleatoriamente
+            # 4.C. Si no encontró, vagar aleatoriamente CON INERCIA
             self.state = "WANDERING"
             next_pos = self.get_wandering_move()
             
             if next_pos:
+                # Guardar movimiento para inercia
+                dx = next_pos[0] - self.pos[0]
+                dy = next_pos[1] - self.pos[1]
+                self.last_move = (dx, dy)
+                
                 self.model.grid.move_agent(self, next_pos)
-            # Si next_pos es None, espera (por semáforo rojo)
+                self.stuck_counter = 0  # [RESET COUNTER]
+            else:
+                # No se movió
+                self.stuck_counter += 1
+                if self.is_under_observation:
+                    print(f"   ⏸️  CAR {self.unique_id} didn't move. StuckCounter={self.stuck_counter}")
 
     def get_wandering_move(self):
         """
-        *** FIX BUG B: Decide movimiento WANDERING evitando "baile" en semáforos ***
+        Decide el movimiento WANDERING con lógica estricta Anti-Reversa.
         
-        Estrategia:
-        1. Si mejor opción (recto) está bloqueada por SEMÁFORO → ESPERAR (return None)
-        2. Si mejor opción está bloqueada por COCHE → Intentar siguiente opción
-        3. Priorizar peso bajo (ir recto) sobre cambio de carril
+        NUEVA ESTRATEGIA (Anti-Ping-Pong):
+        1. Separar opciones en "adelante/lateral" vs "atrás" (U-turn)
+        2. Priorizar FUERTEMENTE continuar recto (weight * 0.1)
+        3. Solo permitir U-turn si es la única opción (callejón sin salida)
+        4. Si mejor opción tiene luz roja → ESPERAR (no dar vuelta en U)
         """
+        
+        # FIX CRÍTICO: Recuperar last_move del historial si es None
+        if self.last_move is None and len(self.position_history) >= 2:
+            # Calcular movimiento desde posición anterior
+            prev_pos = list(self.position_history)[-2]
+            curr_pos = self.pos
+            self.last_move = (curr_pos[0] - prev_pos[0], curr_pos[1] - prev_pos[1])
+            
+            # Solo mantener si es movimiento válido (no (0,0))
+            if self.last_move == (0, 0):
+                self.last_move = None
+            elif self.is_under_observation:
+                print(f"   🔧 RECOVERED last_move from history: {self.last_move}")
+        
+        # [LOGGING ENTRADA]
+        step_num = self.model.schedule.steps
+        is_stuck, stuck_reason = detect_stuck_pattern(self)
+        
+        if is_stuck:
+            self.is_under_observation = True
+            print(f"\n🚨 STUCK DETECTION: Car {self.unique_id}")
+            print(f"   Step: {step_num}, Pos: {self.pos}")
+            print(f"   Reason: {stuck_reason}")
+            print(f"   LastMove: {self.last_move}")
+            print(f"   Destination: {self.destination}")
+            print(f"   State: {self.state}")
         
         neighbors = self.model.grid.get_neighborhood(
             self.pos, moore=False, include_center=False
         )
-        valid_options = []
+        
+        # Listas separadas para priorizar
+        forward_options = []  # Opciones que NO son reversa
+        backward_options = [] # Opción de volver por donde vine
+        
+        # Calcular vector de reversa (lo opuesto a mi último movimiento)
+        backward_direction = None
+        if self.last_move:
+            backward_direction = (-self.last_move[0], -self.last_move[1])
 
-        # Obtener vecinos conectados en el grafo
         for n in neighbors:
+            # Validar conectividad del grafo y semáforos
             if self.model.G.has_edge(self.pos, n):
                 weight = self.model.G.edges[self.pos, n]['weight']
-                valid_options.append((n, weight))
+                dx = n[0] - self.pos[0]
+                dy = n[1] - self.pos[1]
+                direction = (dx, dy)
+                
+                # Inercia: Bonificar fuertemente seguir recto
+                if self.last_move and direction == self.last_move:
+                    weight *= 0.1  # Bonificación masiva (antes 0.5)
+                
+                # [LOGGING DETALLE DE VECINO]
+                if self.is_under_observation:
+                    light_ok = self.can_pass_traffic_light(n)
+                    move_ok = self.can_move_to(n)
+                    
+                    # Obtener estado del semáforo si existe
+                    light_status = "No Light"
+                    cell_contents = self.model.grid.get_cell_list_contents([n])
+                    for agent in cell_contents:
+                        if isinstance(agent, TrafficLight):
+                            light_status = f"{agent.state} ({agent.direction})"
+                            break
+                    
+                    print(f"   → Neighbor {n}:")
+                    print(f"     Weight: {weight:.1f} (direction={direction})")
+                    print(f"     LightOK: {light_ok}, MoveOK: {move_ok}")
+                    print(f"     LightStatus: {light_status}")
+                    
+                    # Si MoveOK es False, mostrar por qué
+                    if not move_ok:
+                        occupants = [type(a).__name__ for a in cell_contents]
+                        print(f"     Occupants: {occupants}")
+                
+                # Clasificar opción
+                option = (n, weight, direction)
+                
+                if backward_direction and direction == backward_direction:
+                    backward_options.append(option)
+                else:
+                    forward_options.append(option)
 
-        # Ordenar por peso (peso 1 = recto, peso 10 = cambio carril)
-        valid_options.sort(key=lambda x: x[1])
-
-        if not valid_options:
-            return None
-
-        # REGLA PRIORITARIA: Evaluación del primer candidato (recto)
-        best_pos, best_weight = valid_options[0]
-
-        # *** CLAVE: Si semáforo ROJO/AMARILLO bloquea la mejor opción, ESPERAR ***
-        if not self.can_pass_traffic_light(best_pos):
-            if self.debug:
-                print(f"🛑 CAR {self.unique_id} WAITING at red light towards {best_pos}")
-            return None  # NO BAILAR - solo esperar
-
-        # Si recto está disponible (semáforo verde y sin coches), tomar
-        if self.can_move_to(best_pos):
-            return best_pos
-
-        # Si recto no está disponible (otro coche), intentar alternativas
-        for next_pos, weight in valid_options[1:]:
-            # Verificar semáforo para esta opción
-            if not self.can_pass_traffic_light(next_pos):
-                continue  # Esta alternativa también tiene rojo, saltar
+        # EMERGENCIA: Si muy atorado, forzar decisión
+        if self.stuck_counter > 15:
+            print(f"\n🚨 EMERGENCY ESCAPE: Car {self.unique_id} forcing move after {self.stuck_counter} stuck steps")
             
-            if self.can_move_to(next_pos):
-                return next_pos
+            # Opción 1: Intentar U-turn forzado
+            if backward_options:
+                print(f"   → Taking emergency U-turn to {backward_options[0][0]}")
+                return backward_options[0][0]
+            
+            # Opción 2: Resetear inercia y recalcular
+            self.last_move = None
+            self.stuck_counter = 0
+            print(f"   → Resetting inercia for next step")
+            return None  # Re-evaluar próximo step sin inercia
 
+        # 1. Intentar moverse hacia adelante/lados primero
+        # Ordenar por peso
+        forward_options.sort(key=lambda x: x[1])
+        
+        # [LOGGING DECISION]
+        if self.is_under_observation:
+            print(f"   ✅ DECISION: Trying options in order...")
+        
+        for pos, weight, direction in forward_options:
+            # Si semáforo ROJO en mi mejor opción, ESPERAR (no dar vuelta en U)
+            if not self.can_pass_traffic_light(pos):
+                if self.is_under_observation:
+                    print(f"   ❌ STUCK: No valid move found. Red light blocks best option.")
+                    print("")
+                return None 
+                
+            if self.can_move_to(pos):
+                if self.is_under_observation:
+                    print(f"   ✅ MOVING: To {pos}")
+                    print("")
+                return pos
+        
+        # 2. Si no hay opciones adelante (callejón sin salida o bloqueado por coches)
+        # Solo entonces consideramos volver atrás
+        if not forward_options and backward_options:
+            back_pos = backward_options[0][0]
+            if self.can_pass_traffic_light(back_pos) and self.can_move_to(back_pos):
+                if self.is_under_observation:
+                    print(f"   ⚠️ U-TURN: No forward options, taking U-turn to {back_pos}")
+                    print("")
+                return back_pos
+
+        # 3. Si todo falla (bloqueado total)
+        # [LOGGING FALLBACK]
+        if self.is_under_observation:
+            print(f"   ❌ STUCK: No valid move found. All options blocked/red.")
+            print("")
+        
         return None
 
     def can_pass_traffic_light(self, pos):
         """
         Verifica si el semáforo permite el paso hacia 'pos'.
-        
-        Regla de Oro: Si ya estoy DENTRO de una intersección (en self.pos),
-        siempre permitir avance para despejar el cruce.
+        Regla de Oro: Si ya estoy DENTRO de una intersección, permitir avance.
         """
         
         # 1. ¿Estoy ya dentro de una intersección?
@@ -179,7 +345,7 @@ class Car(Agent):
         )
         
         if am_in_intersection:
-            return True  # Siempre despejar intersección
+            return True  # Despejar intersección
 
         # 2. ¿Hay semáforo en la celda destino?
         cell_contents = self.model.grid.get_cell_list_contents([pos])
@@ -188,38 +354,32 @@ class Car(Agent):
             if isinstance(agent, TrafficLight):
                 if agent.state == "Green":
                     return True
-
                 elif agent.state in ["Red", "Yellow"]:
-                    # Bloqueo por ejes: NS bloquea movimiento vertical, EW bloquea horizontal
                     dx = pos[0] - self.pos[0]
                     dy = pos[1] - self.pos[1]
 
-                    if agent.direction == "NS":  # Bloquea N-S (dy != 0)
+                    if agent.direction == "NS":
                         if dy != 0:
-                            return False  # Movimiento vertical bloqueado
-                    
-                    elif agent.direction == "EW":  # Bloquea E-W (dx != 0)
+                            return False
+                    elif agent.direction == "EW":
                         if dx != 0:
-                            return False  # Movimiento horizontal bloqueado
+                            return False
 
                 return True
 
-        return True  # Sin semáforo, permitir
+        return True
 
     def can_move_to(self, pos):
         """
         Verifica si el coche puede moverse a la posición.
-        Chequea: límites grafo, semáforos, coches, obstáculos, protección parking.
         """
         
-        # Verificar si pos está en grafo y hay arista
         if pos not in self.model.G:
             return False
         
         if not self.model.G.has_edge(self.pos, pos):
             return False
 
-        # Verificar semáforo (usa lógica reutilizada)
         if not self.can_pass_traffic_light(pos):
             return False
 
@@ -242,16 +402,12 @@ class Car(Agent):
         return True
 
     def broadcast_request(self):
-        """
-        Contract Net Protocol: Solicita ofertas de todos los destinos.
-        Elige el más cercano disponible.
-        """
+        """Contract Net Protocol: Solicita ofertas de todos los destinos."""
         
         best_bid = float('inf')
         best_dest = None
 
         for dest in self.model.destinations:
-            # Ignorar el parking del que acabo de salir
             if dest == self.do_not_park_here:
                 continue
 
@@ -268,7 +424,7 @@ class Car(Agent):
             self.calculate_path()
 
     def calculate_path(self):
-        """Calcula ruta usando Dijkstra ponderado (A* simplificado)."""
+        """Calcula ruta usando Dijkstra ponderado."""
         
         if (
             not self.destination
@@ -282,16 +438,15 @@ class Car(Agent):
                 self.model.G, self.pos, self.destination.pos, weight='weight'
             )
             
-            # Remover el primer nodo (posición actual)
             if len(self.path) > 0:
                 self.path.pop(0)
         
         except (nx.NetworkXNoPath, nx.NodeNotFound):
-            # Ruta imposible - liberar destino y volver a WANDERING
             self.destination.release()
             self.destination = None
             self.state = "WANDERING"
             self.path = []
+            self.last_move = None
 
 
 class TrafficLight(Agent):
@@ -299,11 +454,9 @@ class TrafficLight(Agent):
 
     def __init__(self, unique_id, model, direction="NS", state="Green", time_offset=0):
         super().__init__(unique_id, model)
-        self.direction = direction  # "NS" (Norte-Sur) o "EW" (Este-Oeste)
+        self.direction = direction
         self.state = state
         self.timer = 10 - time_offset if state == "Green" else 10
-        
-        # Tiempos fijos por fase
         self.green_time = 10
         self.yellow_time = 3
         self.red_time = 10
@@ -314,22 +467,19 @@ class TrafficLight(Agent):
         self.timer -= 1
 
         if self.timer <= 0:
-            # Cambiar de estado
             if self.state == "Green":
                 self.state = "Yellow"
                 self.timer = self.yellow_time
-            
             elif self.state == "Yellow":
                 self.state = "Red"
                 self.timer = self.red_time
-            
             elif self.state == "Red":
                 self.state = "Green"
                 self.timer = self.green_time
 
 
 class Obstacle(Agent):
-    """Edificio u obstáculo estático (no se mueve)."""
+    """Edificio u obstáculo estático."""
 
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
@@ -348,8 +498,8 @@ class Destination(Agent):
 
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-        self.occupant = None  # Coche estacionado
-        self.reserved_by = None  # Coche en ruta
+        self.occupant = None
+        self.reserved_by = None
 
     def step(self):
         pass
@@ -358,41 +508,56 @@ class Destination(Agent):
         """Calcula oferta de distancia si está disponible."""
         
         if self.occupant is not None or self.reserved_by is not None:
-            return float('inf')  # No disponible
+            return float('inf')
 
-        # Distancia Manhattan
         dx = abs(self.pos[0] - car_pos[0])
         dy = abs(self.pos[1] - car_pos[1])
         return dx + dy
 
     def book(self, car_agent):
-        """Reserva destino para un coche (cambiar a amarillo)."""
+        """Reserva destino para un coche."""
         self.reserved_by = car_agent
         return True
 
     def release(self):
-        """
-        Libera destino completamente.
-        FIX BUG A: Resetear AMBOS occupant y reserved_by
-        """
+        """Libera destino completamente."""
         self.occupant = None
         self.reserved_by = None
 
 
 class ChaoticCar(Car):
     """
+    *** REFACTORIZADO COMPLETAMENTE PARA PROBLEMA 2 ***
+    
     Vehículo caótico que ignora semáforos y causa choques.
-    Hereda de Car pero sobrescribe can_move_to() y step().
+    NUEVA ESTRATEGIA:
+    - Movimiento direccional con inercia (no random.choice)
+    - Ignorar semáforos
+    - NUNCA buscar Destination
+    - NUNCA entrar a celdas de Destination
+    - Velocidad consistente (ir recto siempre si es posible)
     """
-    def can_pass_traffic_light(self, pos):
-        return True  # ¡Soy caótico, siempre paso!
 
     def __init__(self, unique_id, model, destination=None, parking_limit=3):
         super().__init__(unique_id, model, destination, parking_limit)
         self.state = "CHAOS"
+        # *** INERCIA FUERTE para ChaoticCar ***
+        self.last_move = None  # Vector direccional persistente
+
+    def can_pass_traffic_light(self, pos):
+        """Ignora todos los semáforos - ¡soy caótico!"""
+        return True
 
     def can_move_to(self, pos):
-        """Ignora semáforos, solo verifica grafo y obstáculos estáticos."""
+        """
+        *** PROTECCIÓN MEJORADA PARA CHAOTICCAR ***
+        
+        Ignora semáforos, pero:
+        1. Verifica límites de grafo
+        2. Verifica obstáculos estáticos
+        3. NUNCA entra a celdas de Destination (NUEVA RESTRICCIÓN)
+        4. NUNCA considera coches como bloqueantes (zig-zag a través)
+        """
         
         if pos not in self.model.G:
             return False
@@ -402,77 +567,132 @@ class ChaoticCar(Car):
 
         cell_contents = self.model.grid.get_cell_list_contents([pos])
 
-        # Solo bloquea obstáculos estáticos, IGNORA semáforos y otros coches
+        # *** NUEVA: Bloquear Destination completamente ***
         for agent in cell_contents:
+            if isinstance(agent, Destination):
+                return False  # NUNCA entrar a parking
+            
             if isinstance(agent, Obstacle):
-                return False
+                return False  # Bloquear obstáculos
 
+        # Nota: Ignora Car y TrafficLight (se puede colisionar)
         return True
 
-    def step(self):
-        """Movimiento caótico sin reglas de tránsito normales."""
+    def get_chaotic_move(self):
+        """
+        *** NUEVO MÉTODO: Movimiento caótico pero DIRECCIONAL ***
         
-        # 1. Calcular ruta si tiene destino
-        if self.destination and not self.path:
-            self.calculate_path()
+        Estrategia:
+        1. Obtener vecinos válidos
+        2. SI hay last_move → PREFERIR continuación (inercia fuerte)
+        3. SI está bloqueado → GIRAR a random
+        4. Ignorar semáforos (can_pass_traffic_light siempre True)
+        
+        RESULTADO: Movimiento rápido y direccional, no zig-zag
+        """
+        
+        neighbors = self.model.grid.get_neighborhood(
+            self.pos, moore=False, include_center=False
+        )
+        valid_moves = []
 
-        # 2. Vagar si no tiene destino
-        if not self.destination:
-            self.state = "WANDERING"
+        # Obtener movimientos válidos con pesos
+        for n in neighbors:
+            if self.can_move_to(n):
+                weight = self.model.G.edges[self.pos, n]['weight'] if self.model.G.has_edge(self.pos, n) else 100
+                dx = n[0] - self.pos[0]
+                dy = n[1] - self.pos[1]
+                direction = (dx, dy)
+                valid_moves.append((n, weight, direction))
+
+        if not valid_moves:
+            return None
+
+        # *** INERCIA FUERTE: Si hay last_move, preferir continuación ***
+        if self.last_move:
+            # Buscar continuación
+            for n, weight, direction in valid_moves:
+                if direction == self.last_move:
+                    # Continuar en dirección actual (ignorar peso)
+                    return n
+        
+        # Si no hay continuación o último paso es None, elegir mejor peso disponible
+        valid_moves.sort(key=lambda x: x[1])
+        best_pos = valid_moves[0][0]
+        
+        return best_pos
+
+    def step(self):
+        """
+        *** MOVIMIENTO CAÓTICO SIMPLIFICADO ***
+        
+        ChaoticCar no busca parking, solo va rápido en línea recta.
+        Si choca con coche normal → crash.
+        Si está bloqueado → gira.
+        """
+        
+        # NUNCA buscar destino (override totalmente)
+        self.destination = None
+        self.path = []
+        self.state = "CHAOS"
+
+        # Obtener movimiento (con inercia)
+        next_pos = self.get_chaotic_move()
+
+        if not next_pos:
+            # Completamente bloqueado → esperar o girar random
+            neighbors = self.model.grid.get_neighborhood(
+                self.pos, moore=False, include_center=False
+            )
+            valid = [n for n in neighbors if self.can_move_to(n)]
+            if valid:
+                next_pos = random.choice(valid)
+            else:
+                # Pared total, no moverse
+                self.last_move = None
+                return
+
+        # Detectar colisión con coche normal
+        cell_contents = self.model.grid.get_cell_list_contents([next_pos])
+        victim = None
+        
+        for agent in cell_contents:
+            if isinstance(agent, Car) and not isinstance(agent, ChaoticCar):
+                victim = agent
+                break
+
+        if victim:
+            # CRASH: Marcar víctima como CRASHED
+            victim.state = "CRASHED"
+
+            # ChaoticCar huye (elegir dirección ortogonal)
             neighbors = self.model.grid.get_neighborhood(
                 self.pos, moore=False, include_center=False
             )
             valid = [n for n in neighbors if self.can_move_to(n)]
             
             if valid:
-                self.model.grid.move_agent(self, random.choice(valid))
-            return
-
-        # 3. Seguir ruta o buscar nuevos objetivos
-        if self.path:
-            next_pos = self.path[0]
-
-            # Detectar colisión con Car normal
-            cell_contents = self.model.grid.get_cell_list_contents([next_pos])
-            victim = None
-            
-            for agent in cell_contents:
-                if isinstance(agent, Car) and not isinstance(agent, ChaoticCar):
-                    victim = agent
-                    break
-
-            if victim:
-                # CRASH: Marcar víctima como CRASHED
-                victim.state = "CRASHED"
-
-                # ChaoticCar huye
+                # Huir a dirección aleatoria (romper inercia por caos)
+                escape_pos = random.choice(valid)
+                dx = escape_pos[0] - self.pos[0]
+                dy = escape_pos[1] - self.pos[1]
+                self.last_move = (dx, dy)
+                self.model.grid.move_agent(self, escape_pos)
                 self.destination = None
                 self.path = []
-
-                # Escapar a vecino aleatorio
-                neighbors = self.model.grid.get_neighborhood(
-                    self.pos, moore=False, include_center=False
-                )
-                valid = [n for n in neighbors if self.can_move_to(n)]
-                
-                if valid:
-                    self.model.grid.move_agent(self, random.choice(valid))
-            else:
-                # Sin colisión, avanzar
-                if self.can_move_to(next_pos):
-                    self.model.grid.move_agent(self, next_pos)
-                    self.path.pop(0)
-                else:
-                    # Recalcular ruta si está bloqueado
-                    self.path = []
-
+            
+            self.last_move = None  # Reset después de crash
+        else:
+            # Sin colisión, avanzar normalmente
+            dx = next_pos[0] - self.pos[0]
+            dy = next_pos[1] - self.pos[1]
+            self.last_move = (dx, dy)
+            
+            self.model.grid.move_agent(self, next_pos)
 
 
 class PoliceCar(Car):
-    """
-    Patrulla que persigue ChaoticCars.
-    Hereda de Car pero sobrescribe step() con lógica PATROL/CHASE.
-    """
+    """Patrulla que persigue ChaoticCars."""
 
     def __init__(self, unique_id, model, destination=None, parking_limit=3, checkpoints=None):
         super().__init__(unique_id, model, destination, parking_limit)
@@ -483,7 +703,7 @@ class PoliceCar(Car):
     def step(self):
         """PATROL → detect ChaoticCar → CHASE → pursue → return PATROL."""
         
-        # 1. Detectar ChaoticCar en radio
+        # Detectar ChaoticCar en radio
         neighbors = self.model.grid.get_neighbors(
             self.pos, moore=True, radius=5, include_center=False
         )
@@ -504,6 +724,11 @@ class PoliceCar(Car):
                 if len(path) > 1:
                     next_pos = path[1]
                     if self.can_move_to(next_pos):
+                        # Guardar movimiento para inercia
+                        dx = next_pos[0] - self.pos[0]
+                        dy = next_pos[1] - self.pos[1]
+                        self.last_move = (dx, dy)
+                        
                         self.model.grid.move_agent(self, next_pos)
             
             except (nx.NetworkXNoPath, nx.NodeNotFound):
@@ -517,6 +742,10 @@ class PoliceCar(Car):
                 # Sin checkpoints: vagar
                 next_pos = self.get_wandering_move()
                 if next_pos:
+                    dx = next_pos[0] - self.pos[0]
+                    dy = next_pos[1] - self.pos[1]
+                    self.last_move = (dx, dy)
+                    
                     self.model.grid.move_agent(self, next_pos)
                 return
 
@@ -524,7 +753,6 @@ class PoliceCar(Car):
             target_pos = self.checkpoints[self.current_checkpoint_index]
 
             if self.pos == target_pos:
-                # Avanzar al siguiente checkpoint
                 self.current_checkpoint_index = (
                     self.current_checkpoint_index + 1
                 ) % len(self.checkpoints)
@@ -536,10 +764,13 @@ class PoliceCar(Car):
                 if len(path) > 1:
                     next_pos = path[1]
                     if self.can_move_to(next_pos):
+                        dx = next_pos[0] - self.pos[0]
+                        dy = next_pos[1] - self.pos[1]
+                        self.last_move = (dx, dy)
+                        
                         self.model.grid.move_agent(self, next_pos)
             
             except (nx.NetworkXNoPath, nx.NodeNotFound):
-                # Checkpoint inalcanzable, pasar al siguiente
                 self.current_checkpoint_index = (
                     self.current_checkpoint_index + 1
                 ) % len(self.checkpoints)
