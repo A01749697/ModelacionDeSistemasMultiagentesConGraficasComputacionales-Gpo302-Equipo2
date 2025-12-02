@@ -691,6 +691,7 @@ class PoliceCar(Car):
         self.chase_memory_max = 50
         self.arrest_timer = 0  # Cuando arresta, espera 5 steps
         self.arrest_duration = 8  # 5 steps para desaparecer
+        self.cooldown_timer = 0  # [NUEVO] Cooldown post-arresto (anti spawn camping)
         self.debug = True # Force debug for PoliceCar in this file
 
     def detect_chaotic_cars_in_range(self):
@@ -732,43 +733,63 @@ class PoliceCar(Car):
         """
         self.position_history.append(self.pos)
         
+        # --- COOLDOWN (BUROCRACIA POST-ARRESTO) ---
+        if self.cooldown_timer > 0:
+            self.cooldown_timer -= 1
+            self.state = "PATROL"  # Forzar patrullaje durante cooldown
+            # Ejecutar lógica de patrullaje (saltar a PATROL al final)
+            # No detectar ni perseguir durante cooldown
+            if self.debug:
+                print(f"[POLICE {self.unique_id}] 📋 Processing paperwork... Cooldown: {self.cooldown_timer}")
+        
         # --- ESTADO ARRESTING ---
         if self.state == "ARRESTING":
             self.arrest_timer -= 1
             if self.arrest_timer <= 0:
-                # Volver a patrullaje
+                # Volver a patrullaje CON COOLDOWN
                 self.state = "PATROL"
                 self.chase_target = None
+                self.cooldown_timer = 20  # [NUEVO] 20 steps (~2 seg) sin poder arrestar
+                if self.debug:
+                    print(f"[POLICE {self.unique_id}] ✅ Arrest completed. Starting cooldown (20 steps)")
             return
         
-        # --- DETECTAR CHAOTIC CARS ---
-        chaotic_cars = self.detect_chaotic_cars_in_range()
+        # --- DETECTAR CHAOTIC CARS (SOLO SI NO HAY COOLDOWN) ---
+        chaotic_cars = []
         
-        # CLEANUP FIX: Validar que el objetivo actual sigue existiendo
-        if self.chase_target:
-            # Verificar si el objetivo fue removido del modelo
-            if self.chase_target not in self.model.schedule.agents:
-                self.chase_target = None
-                self.last_known_pos = None
-                self.chase_memory_timer = 0
-        
-        if chaotic_cars:
-            # Entrar en CHASE: elegir el más cercano
-            target_car, distance = chaotic_cars[0]
-            self.chase_target = target_car
-            self.last_known_pos = target_car.pos
-            self.chase_memory_timer = self.chase_memory_max
-            self.state = "CHASE"
-        else:
-            # Decrementar memoria
-            if self.chase_memory_timer > 0:
-                self.chase_memory_timer -= 1
-                # Mantener estado CHASE si hay memoria
+        if self.cooldown_timer == 0:  # [NUEVO] Solo detectar si no está en cooldown
+            chaotic_cars = self.detect_chaotic_cars_in_range()
+            
+            # CLEANUP FIX: Validar que el objetivo actual sigue existiendo
+            if self.chase_target:
+                # Verificar si el objetivo fue removido del modelo
+                if self.chase_target not in self.model.schedule.agents:
+                    self.chase_target = None
+                    self.last_known_pos = None
+                    self.chase_memory_timer = 0
+            
+            if chaotic_cars:
+                # Entrar en CHASE: elegir el más cercano
+                target_car, distance = chaotic_cars[0]
+                self.chase_target = target_car
+                self.last_known_pos = target_car.pos
+                self.chase_memory_timer = self.chase_memory_max
                 self.state = "CHASE"
             else:
-                self.chase_target = None
-                self.last_known_pos = None
-                self.state = "PATROL"
+                # Decrementar memoria
+                if self.chase_memory_timer > 0:
+                    self.chase_memory_timer -= 1
+                    # Mantener estado CHASE si hay memoria
+                    self.state = "CHASE"
+                else:
+                    self.chase_target = None
+                    self.last_known_pos = None
+                    self.state = "PATROL"
+        else:
+            # Durante cooldown: forzar PATROL, ignorar criminales
+            self.state = "PATROL"
+            self.chase_target = None
+            self.last_known_pos = None
         
         # --- ESTADO CHASE ---
         if self.state == "CHASE":
