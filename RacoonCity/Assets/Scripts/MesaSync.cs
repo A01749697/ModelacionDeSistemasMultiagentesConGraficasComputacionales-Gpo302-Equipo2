@@ -185,10 +185,41 @@ public class MesaSync : MonoBehaviour
         else if (direction == "EW") lightGO.transform.localRotation = Quaternion.Euler(0, 90, 0);
     }
 
+    // [FIX] Implementación visual basada en State Codes
     private void UpdateCar(int id, string state)
     {
         if (!unityAgents.ContainsKey(id)) return;
-        // Aquí implementaremos el cambio de color en el siguiente paso
+        
+        GameObject go = unityAgents[id];
+        Renderer r = go.GetComponentInChildren<Renderer>(); // Busca en hijos por si el modelo es complejo
+        if (r == null) r = go.GetComponent<Renderer>();     // Fallback
+        
+        if (r == null) return;
+
+        // Recuperamos el state_code del último JSON procesado no es directo aquí, 
+        // así que usaremos lógica de strings o colores directos por ahora.
+        // MEJORA: Para ser precisos, idealmente Unity debería recibir el "state_code" integer.
+        // Pero como el JSON trae "state_code", necesitamos leerlo en ApplyMesaState o inferirlo aquí.
+        
+        // Vamos a inferir el color basado en el nombre del objeto que pusimos en ApplyMesaState
+        // go.name es algo como "PoliceCar_201" o "ChaoticCar_250"
+        
+        if (go.name.Contains("Police"))
+        {
+            if (state == "CHASE") r.material.color = Color.red;          // Sirena
+            else if (state == "ARRESTING") r.material.color = Color.cyan; // Arresto
+            else r.material.color = Color.blue;                          // Patrulla
+        }
+        else if (go.name.Contains("Chaotic"))
+        {
+            if (state == "ESCAPING") r.material.color = new Color(1f, 0.5f, 0f); // Naranja
+            else if (state == "ARRESTED") r.material.color = Color.gray;         // Detenido
+            else r.material.color = Color.magenta;                               // Caos normal
+        }
+        else // Car normal
+        {
+             r.material.color = Color.white;
+        }
     }
 
     private void UpdateDestination(int id, string state)

@@ -66,9 +66,14 @@ async def process_message(message: str):
     
     if msg_type == "step":
         # Ejecutar un paso de la simulación
-        print("⚙️ Ejecutando model.step()...")
         model.step()
-        print(f"✅ Step completado. Cars activos: {len([a for a in model.grid.get_all_cell_contents() if type(a).__name__ == 'Car'])}")
+        
+        # [MEJORA] Log detallado por tipo
+        police = [a for a in model.schedule.agents if type(a).__name__ == 'PoliceCar']
+        chaotic = [a for a in model.schedule.agents if type(a).__name__ == 'ChaoticCar']
+        cars = [a for a in model.schedule.agents if type(a).__name__ == 'Car']
+        
+        print(f"✅ Step. Stats -> 🚓 Policías: {len(police)} | 😈 Caos: {len(chaotic)} | 🚙 Civiles: {len(cars)}")
     else:
         print(f"⚠️ Tipo de mensaje desconocido: {msg_type}")
 

@@ -61,6 +61,7 @@ class CityModel(Model):
         self.num_chaotic = num_chaotic  # Spawn inicial, luego dinámico
         self.parking_time = parking_time
         self.spawn_timer = 0
+        self.spawn_interval = 10  # [FIX] Intervalo entre spawns (era typo: spaw_interval)
         
         # Limitar a 5 PCs estrictamente
         self.num_police = min(self.num_police, 5)
@@ -359,9 +360,20 @@ class CityModel(Model):
         return police_car
 
     def spawn_chaotic_from_tunnel(self, start_pos=None):
-        """Spawnea un ChaoticCar desde el túnel."""
+        """Spawnea un ChaoticCar con dispersión para evitar arresto inmediato."""
         if start_pos is None:
-            start_pos = self.tunnel_spawn_point
+            # [FIX] Intentar spawnear en un radio alrededor del túnel o aleatorio si está bloqueado
+            tunnel_area = [(22, 22), (22, 21), (21, 22), (21, 21)]
+            random.shuffle(tunnel_area)
+            
+            start_pos = tunnel_area[0]  # Default
+            
+            # Buscar una celda libre en el área del túnel (sin policías cerca)
+            for pos in tunnel_area:
+                cell_contents = self.grid.get_cell_list_contents([pos])
+                if not any(isinstance(a, PoliceCar) for a in cell_contents):
+                    start_pos = pos
+                    break
         
         chaotic_car = ChaoticCar(
             self.next_id(),
@@ -409,7 +421,7 @@ class CityModel(Model):
         
         # Respawn: Prioridad a Policía (nunca más de 5)
         self.spawn_timer += 1
-        if self.spawn_timer >= 2:
+        if self.spawn_timer >= self.spawn_interval:  # [CAMBIO] Usar variable configurable
             self.spawn_timer = 0
             
             if current_police < self.num_police:
