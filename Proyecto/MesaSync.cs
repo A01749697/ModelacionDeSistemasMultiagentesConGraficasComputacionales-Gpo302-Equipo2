@@ -174,27 +174,35 @@ public class MesaSync : MonoBehaviour
     private void UpdateTrafficLight(int id, string state, string direction)
     {
         if (!unityAgents.ContainsKey(id)) return;
-        GameObject lightGO = unityAgents[id];
         
-        // Cambiar material según el estado
-        Renderer renderer = lightGO.GetComponent<Renderer>();
-        if (renderer != null)
+        GameObject lightGO = unityAgents[id];
+
+        // Obtener el controlador del semáforo
+        TrafficLightController trafficController = lightGO.GetComponent<TrafficLightController>();
+        
+        if (trafficController != null)
         {
-            switch (state)
+            // Llamar al controlador para que maneje las 3 luces
+            trafficController.SetTrafficLightState(state);
+        }
+        else
+        {
+            // Fallback: si no hay controlador, intentar cambiar el material del objeto raíz
+            Debug.LogWarning($"TrafficLight {id} sin TrafficLightController. Asignando material al raíz.");
+            
+            Renderer renderer = lightGO.GetComponent<Renderer>();
+            if (renderer != null)
             {
-                case "Green":
-                    renderer.material = greenLightMaterial;
-                    break;
-                case "Yellow":
-                    renderer.material = yellowLightMaterial;
-                    break;
-                case "Red":
-                    renderer.material = redLightMaterial;
-                    break;
+                switch (state)
+                {
+                    case "Green":  renderer.material = greenLightMaterial;  break;
+                    case "Yellow": renderer.material = yellowLightMaterial; break;
+                    case "Red":    renderer.material = redLightMaterial;    break;
+                }
             }
         }
 
-        // Rotar según dirección (opcional)
+        // Rotar según dirección (NS o EW)
         if (direction == "NS")
         {
             lightGO.transform.localRotation = Quaternion.Euler(0, 0, 0);
@@ -203,6 +211,9 @@ public class MesaSync : MonoBehaviour
         {
             lightGO.transform.localRotation = Quaternion.Euler(0, 90, 0);
         }
+
+        // Debug log
+        Debug.Log($"🚦 TrafficLight {id} → State: {state}, Direction: {direction}");
     }
 
     private void UpdateCar(int id, string state)
