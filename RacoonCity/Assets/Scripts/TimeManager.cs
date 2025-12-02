@@ -40,7 +40,7 @@ public class TimeManager : MonoBehaviour
 
         if (tempSecond >= 1) // Si ha pasado 1 segundo real
         {
-            int velocidad = 10; // Ejemplo: 10 minutos por segundo (10x más rápido)
+            int velocidad = 5; // Ejemplo: 10 minutos por segundo (10x más rápido)
             Minutes += velocidad;
             tempSecond = 0;
         }
