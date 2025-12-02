@@ -203,50 +203,6 @@ public class MesaSync : MonoBehaviour
             case "Destination":
                 return destinationPrefab;
             default:
-                Debug.LogWarning($"[MesaSync] Unknown agent type: {agentType}");
-                return carPrefab; // Fallback
-        }
-    }
-
-    private void UpdateTrafficLight(int id, string state, string direction)
-    {
-        if (!unityAgents.ContainsKey(id)) return;
-        GameObject lightGO = unityAgents[id];
-        if (lightGO == null) return;
-        
-        // Cambiar material según el estado
-        Renderer renderer = lightGO.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            switch (state)
-            {
-                case "Green":
-                    renderer.material = greenLightMaterial;
-                    break;
-                case "Yellow":
-                    renderer.material = yellowLightMaterial;
-                    break;
-                case "Red":
-                    renderer.material = redLightMaterial;
-                    break;
-            }
-        }
-
-        // Rotar según dirección (opcional)
-        if (direction == "NS")
-        {
-            lightGO.transform.localRotation = Quaternion.Euler(0, 0, 0);
-        }
-        else if (direction == "EW")
-        {
-            lightGO.transform.localRotation = Quaternion.Euler(0, 90, 0);
-        }
-    }
-
-    private void UpdateCar(int id, string state)
-    {
-        if (!unityAgents.ContainsKey(id)) return;
-        // Aquí puedes añadir lógica adicional para coches
         // Por ejemplo, animaciones según el estado
     }
 
