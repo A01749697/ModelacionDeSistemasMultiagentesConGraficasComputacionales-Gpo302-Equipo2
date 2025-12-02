@@ -231,6 +231,19 @@ class CityModel(Model):
                 
                 self.G.add_node((x, y))
                 
+                # ZONAS PROHIBIDAS DE U-TURN (gloriatas internas)
+                PROHIBITED_ZONES = {
+                    # Cada zona: posición -> direcciones permitidas SOLO hacia carril exterior
+                    (3,10): [(0,-1), (-1,0)],  # Solo hacia (2,10) y (3,9) -> exterior
+                    (3,11): [(0,1), (-1,0)],   # Solo hacia (2,11) y (3,12) -> exterior
+                    (10,3): [(0,1), (1,0)],    # Solo hacia (11,3) y (10,4) -> exterior
+                    (11,3): [(0,1), (1,0)],    # Solo hacia (11,4) y (12,3) -> exterior
+                    (22,10): [(0,-1), (1,0)],  # Solo hacia (23,10) y (22,9) -> exterior
+                    (22,11): [(0,1), (1,0)],   # Solo hacia (23,11) y (22,12) -> exterior
+                    (10,22): [(0,-1), (-1,0)], # Solo hacia (10,23) y (9,22) -> exterior
+                    (11,22): [(0,-1), (-1,0)]  # Solo hacia (11,23) y (12,22) -> exterior
+                }
+                
                 for dx, dy in neighbor_offsets:
                     nx_x = x + dx
                     nx_y = y + dy
@@ -284,6 +297,13 @@ class CityModel(Model):
                             can_connect = True
                             weight = 1
                     
+                    # BLOQUEO DE U-TURNS: Restringir giros en gloriatas interiores
+                    direction = (dx, dy)
+                    if (x, y) in PROHIBITED_ZONES:
+                        allowed_dirs = PROHIBITED_ZONES[(x, y)]
+                        if direction not in allowed_dirs:
+                            continue  # NO agregar esta arista -> fuerza al carril exterior
+
                     if can_connect:
                         self.G.add_edge((x, y), (nx_x, nx_y), weight=weight)
         

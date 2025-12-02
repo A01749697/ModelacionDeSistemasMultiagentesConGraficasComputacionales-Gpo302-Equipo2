@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 
 public class MesaSync : MonoBehaviour
 {
+    // =================================================================================
+    // VARIABLES (FROM HEAD/UPSTREAM)
+    // =================================================================================
     public static MesaSync Instance;
     private WebSocket websocket;
     
@@ -33,6 +36,14 @@ public class MesaSync : MonoBehaviour
     private Dictionary<int, GameObject> unityAgents = new Dictionary<int, GameObject>();
     private Dictionary<int, Vector3> targetPositions = new Dictionary<int, Vector3>();
     private float stepTimer = 0f;
+
+    // Added to support Stashed logic (Interpolation)
+    private Dictionary<int, Vector3> targetPositions = new Dictionary<int, Vector3>();
+    public float interpolationSpeed = 5f;
+
+    // =================================================================================
+    // LOGIC
+    // =================================================================================
 
     async void Awake()
     {
@@ -103,22 +114,39 @@ public class MesaSync : MonoBehaviour
                     var go = Instantiate(prefab, agentsRoot);
                     go.name = $"{agentType}_{id}";
                     
+                    // Inicializar AgentController
                     var ctrl = go.GetComponent<AgentController>();
-                    if (ctrl != null) ctrl.agentID = id;
+                    if (ctrl != null)
+                    {
+                        ctrl.Init(id, newPosition);
+                    }
+                    else
+                    {
+                        // Si no tiene AgentController, posicionar directamente
+                        go.transform.localPosition = newPosition;
+                    }
                     
                     unityAgents[id] = go;
-                    
-                    // Posición inicial sin interpolación
-                    go.transform.localPosition = new Vector3(x, 0f, y);
-                    targetPositions[id] = new Vector3(x, 0f, y);
-                    
-                    Debug.Log($"Created {agentType} with ID {id} at ({x}, {y})");
+                    Debug.Log($"[MesaSync] ✨ Spawned {agentType} with ID {id} at ({x}, {y})");
                 }
             }
             else
             {
-                // Actualizar posición objetivo para interpolación
-                targetPositions[id] = new Vector3(x, 0f, y);
+                GameObject go = unityAgents[id];
+                if (go != null)
+                {
+                    var ctrl = go.GetComponent<AgentController>();
+                    if (ctrl != null)
+                    {
+                        // Delegar interpolación al AgentController
+                        ctrl.UpdatePosition(newPosition);
+                    }
+                    else
+                    {
+                        // Si no tiene AgentController, mover directamente
+                        go.transform.localPosition = newPosition;
+                    }
+                }
             }
 
             // Actualizar estado específico del tipo de agente
@@ -146,102 +174,11 @@ public class MesaSync : MonoBehaviour
         
         foreach (int id in toRemove)
         {
-            Debug.Log($"🗑️ Removing agent {id}");
-            Destroy(unityAgents[id]);
-            unityAgents.Remove(id);
-            targetPositions.Remove(id);
-        }
-    }
-
-    private GameObject GetPrefabForType(string agentType)
-    {
-        switch (agentType)
-        {
-            case "Car":
-                return carPrefab;
-            case "TrafficLight":
-                return trafficLightPrefab;
-            case "Obstacle":
-                return obstaclePrefab;
-            case "Destination":
-                return destinationPrefab;
-            default:
-                Debug.LogWarning($"Unknown agent type: {agentType}");
-                return carPrefab; // Fallback
-        }
-    }
-
-    private void UpdateTrafficLight(int id, string state, string direction)
-    {
-        if (!unityAgents.ContainsKey(id)) return;
-        
-        GameObject lightGO = unityAgents[id];
-
-        // Obtener el controlador del semáforo
-        TrafficLightController trafficController = lightGO.GetComponent<TrafficLightController>();
-        
-        if (trafficController != null)
-        {
-            // Llamar al controlador para que maneje las 3 luces
-            trafficController.SetTrafficLightState(state);
-        }
-        else
-        {
-            // Fallback: si no hay controlador, intentar cambiar el material del objeto raíz
-            Debug.LogWarning($"TrafficLight {id} sin TrafficLightController. Asignando material al raíz.");
-            
-            Renderer renderer = lightGO.GetComponent<Renderer>();
-            if (renderer != null)
+            Debug.Log($"[MesaSync] 🗑️ Removing agent {id}");
+            if (unityAgents.ContainsKey(id) && unityAgents[id] != null)
             {
-                switch (state)
-                {
-                    case "Green":  renderer.material = greenLightMaterial;  break;
-                    case "Yellow": renderer.material = yellowLightMaterial; break;
-                    case "Red":    renderer.material = redLightMaterial;    break;
-                }
-            }
-        }
-
-        // Rotar según dirección (NS o EW)
-        if (direction == "NS")
         {
-            lightGO.transform.localRotation = Quaternion.Euler(0, 0, 0);
-        }
-        else if (direction == "EW")
-        {
-            lightGO.transform.localRotation = Quaternion.Euler(0, 90, 0);
-        }
-
-        // Debug log
-        Debug.Log($"🚦 TrafficLight {id} → State: {state}, Direction: {direction}");
-    }
-
-    private void UpdateCar(int id, string state)
-    {
-        if (!unityAgents.ContainsKey(id)) return;
-        // Aquí puedes añadir lógica adicional para coches
-        // Por ejemplo, cambiar animaciones si el coche está en movimiento
-    }
-
-    private void UpdateDestination(int id, string state)
-    {
-        if (!unityAgents.ContainsKey(id)) return;
-        GameObject go = unityAgents[id];
-        Renderer r = go.GetComponent<Renderer>();
-        if (r == null) return;
-
-        switch (state)
-        {
-            case "Free": r.material = parkingFreeMat; break;
-            case "Reserved": r.material = parkingReservedMat; break;
-            case "Occupied": r.material = parkingOccupiedMat; break;
-        }
-    }
-
-    void Update()
-    {
-        // Despachar mensajes del WebSocket
-        if (websocket != null)
+            #if !UNITY_WEBGL || UNITY_EDITOR
             websocket.DispatchMessageQueue();
 
         // Temporizador para enviar comandos de step
