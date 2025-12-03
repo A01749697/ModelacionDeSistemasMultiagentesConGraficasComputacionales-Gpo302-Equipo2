@@ -105878,6 +105878,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MesaSync
   carPrefab: {fileID: 8394587222912968243, guid: f2938a91bc6d66a46b75a6817e75e4e6, type: 3}
+  policeCarPrefab: {fileID: 7738698209782943608, guid: d74f5250ac649db40915fbdfcdd152c6, type: 3}
+  chaoticCarPrefab: {fileID: 2005408566914678406, guid: abd1fda3d06e8d04f89816d9b58dc9e6, type: 3}
   trafficLightPrefab: {fileID: 3186124755483035779, guid: ad889911433d47d498d6a68ca6a2c0dc, type: 3}
   obstaclePrefab: {fileID: 7309773219813525513, guid: 47aee529ec6fc8f438dcae31254347f3, type: 3}
   destinationPrefab: {fileID: 712703508472588794, guid: 999adbadcd3a5094e8af4d81b9024426, type: 3}
