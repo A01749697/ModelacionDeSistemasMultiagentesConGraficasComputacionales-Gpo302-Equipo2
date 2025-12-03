@@ -11,6 +11,8 @@ public class MesaSync : MonoBehaviour
     
     [Header("Prefabs")]
     public GameObject carPrefab;
+    public GameObject policeCarPrefab; 
+    public GameObject chaoticCarPrefab;
     public GameObject trafficLightPrefab;
     public GameObject obstaclePrefab;
     public GameObject destinationPrefab;
@@ -154,9 +156,11 @@ public class MesaSync : MonoBehaviour
         switch (agentType)
         {
             case "Car":
-            case "PoliceCar":   // [FIX] Ahora Unity reconocerá Policías
-            case "ChaoticCar":  // [FIX] Ahora Unity reconocerá Caóticos
                 return carPrefab;
+            case "PoliceCar":
+                return policeCarPrefab;
+            case "ChaoticCar":
+                return chaoticCarPrefab;
             case "TrafficLight":
                 return trafficLightPrefab;
             case "Obstacle":
