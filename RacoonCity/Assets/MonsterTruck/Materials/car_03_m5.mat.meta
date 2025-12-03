@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e8a85b8b205ae81478316b83bc10a37e
+timeCreated: 1440610256
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 44776
+  packageName: Cartoon Monster Truck
+  packageVersion: 1.0
+  assetPath: Assets/MonsterTruck/Materials/car_03_m5.mat
+  uploadId: 78739

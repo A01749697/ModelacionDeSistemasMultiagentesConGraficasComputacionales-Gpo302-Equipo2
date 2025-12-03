@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 38daef19a8f3adf45af5afc089a10a84
+timeCreated: 1440610259
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 44776
+  packageName: Cartoon Monster Truck
+  packageVersion: 1.0
+  assetPath: Assets/MonsterTruck/Materials/car_03_m10.mat
+  uploadId: 78739
