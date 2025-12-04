@@ -33,7 +33,6 @@ public class MesaSync : MonoBehaviour
     public Material parkingOccupiedMat;
 
     private Dictionary<int, GameObject> unityAgents = new Dictionary<int, GameObject>();
-    private Dictionary<int, Vector3> targetPositions = new Dictionary<int, Vector3>();
     private float stepTimer = 0f;
 
     async void Awake()
@@ -106,7 +105,12 @@ public class MesaSync : MonoBehaviour
                     
                     unityAgents[id] = go;
                     go.transform.localPosition = new Vector3(x, 0f, y);
-                    targetPositions[id] = new Vector3(x, 0f, y);
+                    
+                    // Inicializar el AgentController si existe
+                    if (ctrl != null)
+                    {
+                        ctrl.Init(id, new Vector3(x, 0f, y));
+                    }
                 }
                 else
                 {
@@ -115,7 +119,12 @@ public class MesaSync : MonoBehaviour
             }
             else
             {
-                targetPositions[id] = new Vector3(x, 0f, y);
+                // Actualizar posición en el AgentController
+                var ctrl = unityAgents[id].GetComponent<AgentController>();
+                if (ctrl != null)
+                {
+                    ctrl.UpdatePosition(new Vector3(x, 0f, y));
+                }
             }
 
             // Actualizar estados específicos
@@ -146,7 +155,6 @@ public class MesaSync : MonoBehaviour
         {
             Destroy(unityAgents[id]);
             unityAgents.Remove(id);
-            targetPositions.Remove(id);
         }
     } // [FIX] ¡Esta es la llave que faltaba probablemente!
 
@@ -250,25 +258,6 @@ public class MesaSync : MonoBehaviour
         {
             stepTimer = 0f;
             SendStepCommand();
-        }
-
-        InterpolateAgentPositions();
-    }
-
-    private void InterpolateAgentPositions()
-    {
-        foreach (var kv in unityAgents)
-        {
-            int id = kv.Key;
-            GameObject go = kv.Value;
-            if (targetPositions.ContainsKey(id))
-            {
-                go.transform.localPosition = Vector3.Lerp(
-                    go.transform.localPosition,
-                    targetPositions[id],
-                    Time.deltaTime * interpolationSpeed
-                );
-            }
         }
     }
 
