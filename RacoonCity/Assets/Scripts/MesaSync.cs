@@ -100,6 +100,15 @@ public class MesaSync : MonoBehaviour
                     var go = Instantiate(prefab, agentsRoot);
                     go.name = $"{agentType}_{id}";
                     
+                    // [NEW] Apply initial rotation
+                    if (!string.IsNullOrEmpty(direction))
+                    {
+                        if (direction == "North") go.transform.localRotation = Quaternion.Euler(0, 0, 0);
+                        else if (direction == "East") go.transform.localRotation = Quaternion.Euler(0, 90, 0);
+                        else if (direction == "South") go.transform.localRotation = Quaternion.Euler(0, 180, 0);
+                        else if (direction == "West") go.transform.localRotation = Quaternion.Euler(0, 270, 0);
+                    }
+                    
                     var ctrl = go.GetComponent<AgentController>();
                     if (ctrl != null) ctrl.agentID = id;
                     

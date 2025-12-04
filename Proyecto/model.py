@@ -20,20 +20,20 @@ import random
 
 # Mapa de la ciudad (24x24 - No toroidal)
 city_map = [
-    "v<<<<<<<<<<<S<<<<<<<<<<<", 
-    "v<<<<<<<<<<<S<<<<<<<<<<^", 
+    "v<<<<<<<<<<<S<<<<<<<<<<<",
+    "v<<<<<<<<<<<S<<<<<<<<<<^",
     "vv##vv##vvSS########D#^^",
-    "SS#Dvv##vv^^#D########^^",  
-    "vvS<<<<<vv^^>>>>>>>>>S^^",  
-    "vvS<<<<<vv^^>>>>>>>>>S^^", 
-    "vv##^^##vv^^#######D##SS", 
-    "SS##^^##vv^^##########^^", 
+    "SS#Dvv##vv^^#D########^^",
+    "vvS<<<<<vv^^>>>>>>>>>S^^",
+    "vvS<<<<<vv^^>>>>>>>>>S^^",
+    "vv##^^##vv^^#######D##SS",
+    "SS##^^##vv^^##########^^",
     "vvS<<<<<<<<<<<<<<<<<<<^^",
-    "vvS<<<<<v##^>>>>>>>>>>^^",
+    "vvS<<<<<v##^<<<<<<<<<<^^",
     "vv>>>>>>v##^>>>>>>>>>S^^",
-    "vv>>>>>>>>>>>>>>>>>>>S^^", 
-    "vv#D^^##vv^^####vv####SS", 
-    "vv##^^##vv^^####vv####^^", 
+    "vv>>>>>>>>>>>>>>>>>>>S^^",
+    "vv#D^^##vv^^####vv####SS",
+    "vv##^^##vv^^####vv####^^",
     "vv##^^##vv^^##D#vv####^^",
     "vv##^^D#vv^^<<<<vv###D^^",
     "vv>>>>>>vv^^<<<<vv####^^",
@@ -43,7 +43,7 @@ city_map = [
     "vv######vv^^####vv####^^",
     "vv##D###SS^^##D#SS####^^",
     "vv>>>>>S>>>>>>>S>>>>>>^^",
-    ">>>>>>>S>>>>>>>S>>>>>>^^"   
+    ">>>>>>>S>>>>>>>S>>>>>>^^"
 ]
 
 from agents import Car, TrafficLight, Obstacle, Destination, ChaoticCar, PoliceCar
@@ -211,121 +211,98 @@ class CityModel(Model):
                     self.destinations.append(destination)
 
     def setup_graph(self):
-        """Crea grafo dirigido basado en flechas del mapa."""
         self.G.clear()
-        w = self.grid.width
-        h = self.grid.height
         
+        # Diccionarios de dirección (No modificar)
         direction_deltas = {
-            '^': (0, 1),
-            'v': (0, -1),
-            '>': (1, 0),
-            '<': (-1, 0)
+            '^': (0, 1), 'v': (0, -1), '>': (1, 0), '<': (-1, 0)
         }
-        
         neighbor_offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)]
         
-        for row in range(len(city_map)):
-            for col in range(len(city_map[row])):
+        # Contadores para validación en consola
+        count_straight = 0
+        count_turn = 0
+        count_lane_change = 0
+        
+        for x in range(self.width):
+            for y in range(self.height):
+                # Obtener símbolo actual (recordar: row = height - 1 - y)
+                row = (self.height - 1) - y
+                col = x
                 cell = city_map[row][col]
-                x = col
-                y = 23 - row
                 
                 if cell == '#':
                     continue
                 
                 self.G.add_node((x, y))
                 
-                # ZONAS PROHIBIDAS DE U-TURN (gloriatas internas)
-                PROHIBITED_ZONES = {
-                    # Cada zona: posición -> direcciones permitidas SOLO hacia carril exterior
-                    (3,10): [(0,-1), (-1,0)],  # Solo hacia (2,10) y (3,9) -> exterior
-                    (3,11): [(0,1), (-1,0)],   # Solo hacia (2,11) y (3,12) -> exterior
-                    (10,3): [(0,1), (1,0)],    # Solo hacia (11,3) y (10,4) -> exterior
-                    (11,3): [(0,1), (1,0)],    # Solo hacia (11,4) y (12,3) -> exterior
-                    (22,10): [(0,-1), (1,0)],  # Solo hacia (23,10) y (22,9) -> exterior
-                    (22,11): [(0,1), (1,0)],   # Solo hacia (23,11) y (22,12) -> exterior
-                    (10,22): [(0,-1), (-1,0)], # Solo hacia (10,23) y (9,22) -> exterior
-                    (11,22): [(0,-1), (-1,0)]  # Solo hacia (11,23) y (12,22) -> exterior
-                }
-                
+                # Evaluar 4 vecinos
                 for dx, dy in neighbor_offsets:
-                    nx_x = x + dx
-                    nx_y = y + dy
+                    nx_x, nx_y = x + dx, y + dy
                     
-                    if not (0 <= nx_x < w and 0 <= nx_y < h):
+                    # 1. Validar límites del mapa
+                    if not (0 <= nx_x < self.width and 0 <= nx_y < self.height):
                         continue
-                    
-                    n_row = 23 - nx_y
+                        
+                    n_row = (self.height - 1) - nx_y
                     n_col = nx_x
                     neighbor_cell = city_map[n_row][n_col]
                     
                     if neighbor_cell == '#':
                         continue
                     
-                    can_connect = False
-                    weight = 1
+                    # VECTOR DE MOVIMIENTO (Hacia dónde intento ir)
+                    move_vec = (dx, dy)
                     
-                    # CASO 1: ESTOY EN CALLE
-                    if cell in direction_deltas:
+                    # --- LÓGICA DE CONEXIÓN ---
+                    
+                    # CASO A: De Calle a Calle (^ v < >)
+                    if cell in direction_deltas and neighbor_cell in direction_deltas:
                         my_dir = direction_deltas[cell]
+                        n_dir = direction_deltas[neighbor_cell]
                         
-                        # [NUEVO] Validación de Contraflujo: Prohibir conexión si direcciones son opuestas
-                        if neighbor_cell in direction_deltas:
-                            n_dir = direction_deltas[neighbor_cell]
-                            # Si son direcciones opuestas (ej. ^ y v), NO conectar
-                            if (my_dir[0] == -n_dir[0]) and (my_dir[1] == -n_dir[1]):
-                                continue
-                        
-                        if (dx, dy) == my_dir:
-                            can_connect = True
-                            weight = 1
-                        
-                        elif neighbor_cell in direction_deltas:
-                            n_dir = direction_deltas[neighbor_cell]
-                            if n_dir == my_dir:
-                                dot_prod = my_dir[0] * dx + my_dir[1] * dy
-                                if dot_prod == 0:
-                                    can_connect = True
-                                    weight = 10
-                        
-                        elif neighbor_cell in ['S', 'D']:
-                            dot_prod = my_dir[0] * dx + my_dir[1] * dy
-                            if dot_prod >= 0:
-                                can_connect = True
-                                weight = 1
-                                if neighbor_cell == 'D':
-                                    weight = 100
-                    
-                    # CASO 2: ESTOY EN INTERSECCIÓN
-                    elif cell in ['S', 'D']:
-                        if neighbor_cell in direction_deltas:
-                            n_dir = direction_deltas[neighbor_cell]
-                            if (dx, dy) != (-n_dir[0], -n_dir[1]):
-                                can_connect = True
-                                weight = 1
-                        
-                        elif neighbor_cell in ['S', 'D']:
-                            can_connect = True
-                            weight = 1
-                    
-                    # BLOQUEO DE U-TURNS: Restringir giros en gloriatas interiores
-                    direction = (dx, dy)
-                    if (x, y) in PROHIBITED_ZONES:
-                        allowed_dirs = PROHIBITED_ZONES[(x, y)]
-                        if direction not in allowed_dirs:
-                            continue  # NO agregar esta arista -> fuerza al carril exterior
+                        # REGLA 1: Inercia (Seguir recto)
+                        # Si me muevo hacia donde apunto Y no es un choque frontal
+                        if move_vec == my_dir and n_dir != (-my_dir[0], -my_dir[1]):
+                            self.G.add_edge((x, y), (nx_x, nx_y), weight=1)
+                            count_straight += 1
+                            
+                        # REGLA 2: Giro Natural (La "Regla de Oro")
+                        # Si la calle destino apunta hacia donde me estoy moviendo.
+                        # Esto permite entrar a una calle perpendicular si va en mi sentido.
+                        elif n_dir == move_vec:
+                            self.G.add_edge((x, y), (nx_x, nx_y), weight=1)
+                            count_turn += 1
+                            
+                        # REGLA 3: Cambio de Carril (Lateral)
+                        # Solo si ambos carriles van EXACTAMENTE a la misma dirección
+                        elif n_dir == my_dir:
+                            self.G.add_edge((x, y), (nx_x, nx_y), weight=3) # Costo mayor
+                            count_lane_change += 1
+                            
+                    # CASO B: Hacia Intersección o Destino (S, D)
+                    elif neighbor_cell in ['S', 'D']:
+                        # Si vengo de una calle, validar no entrar en reversa pura
+                        if cell in direction_deltas:
+                            my_dir = direction_deltas[cell]
+                            # Producto punto >= 0 (no opuestos)
+                            if (my_dir[0] * dx + my_dir[1] * dy) >= 0:
+                                self.G.add_edge((x, y), (nx_x, nx_y), weight=1)
+                        # Si vengo de otra S/D (dentro de intersección grande), libre movimiento
+                        else:
+                            self.G.add_edge((x, y), (nx_x, nx_y), weight=1)
+                            
+                    # CASO C: De Intersección/Destino a Calle (Salida)
+                    elif cell in ['S', 'D'] and neighbor_cell in direction_deltas:
+                        n_dir = direction_deltas[neighbor_cell]
+                        # Permitir entrar a la calle si no es en contraflujo (dot_prod >= 0)
+                        # Esto permite incorporarse desde parking o salir de intersección girando
+                        dot_prod = move_vec[0] * n_dir[0] + move_vec[1] * n_dir[1]
+                        if dot_prod >= 0:
+                            self.G.add_edge((x, y), (nx_x, nx_y), weight=1)
 
-                    if can_connect:
-                        self.G.add_edge((x, y), (nx_x, nx_y), weight=weight)
-        
-        print(f"\n{'='*50}")
-        print(f"📊 REPORTE DE GRAFO")
-        print(f"{'='*50}")
-        print(f"✓ Nodos: {self.G.number_of_nodes()}")
-        print(f"✓ Aristas: {self.G.number_of_edges()}")
-        print(f"✅ TODOS los destinos son alcanzables")
-        print(f"{'='*50}\n")
+        print(f"📊 Grafo Generado: {count_straight} Rectas, {count_turn} Giros, {count_lane_change} Cambios de Carril")
+        print(f"✅ Nodos: {self.G.number_of_nodes()}, Aristas: {self.G.number_of_edges()}")
 
     def get_random_spawn_point(self):
         """Obtiene un punto de spawn aleatorio en cualquier calle válida."""
@@ -499,6 +476,24 @@ class CityModel(Model):
                 
                 elif isinstance(agent, Car):
                     agent_data["state"] = agent.state
+                    
+                    # [NEW] Calculate direction for Unity rotation
+                    if agent.last_move:
+                        dx, dy = agent.last_move
+                        if dx == 1: agent_data["direction"] = "East"
+                        elif dx == -1: agent_data["direction"] = "West"
+                        elif dy == 1: agent_data["direction"] = "North"
+                        elif dy == -1: agent_data["direction"] = "South"
+                    else:
+                        # First turn, read map
+                        map_row = 23 - y
+                        map_col = x
+                        if 0 <= map_row < len(city_map) and 0 <= map_col < len(city_map[0]):
+                            symbol = city_map[map_row][map_col]
+                            if symbol == '^': agent_data["direction"] = "North"
+                            elif symbol == 'v': agent_data["direction"] = "South"
+                            elif symbol == '>': agent_data["direction"] = "East"
+                            elif symbol == '<': agent_data["direction"] = "West"
                     
                     # State codes FASE 1
                     if isinstance(agent, ChaoticCar):

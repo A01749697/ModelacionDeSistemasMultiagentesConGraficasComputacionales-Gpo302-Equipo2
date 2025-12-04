@@ -190,14 +190,30 @@ class Car(Agent):
             self.stuck_counter = 0
             return None
         
-        # Priorizar adelante
-        forward_options.sort(key=lambda x: x[1])
+        # Priorizar adelante (Probabilistic)
+        valid_forward = []
+        for option in forward_options:
+            pos, weight, direction = option
+            if self.can_pass_traffic_light(pos) and self.can_move_to(pos):
+                valid_forward.append(option)
         
-        for pos, weight, direction in forward_options:
-            if not self.can_pass_traffic_light(pos):
-                return None
-            if self.can_move_to(pos):
-                return pos
+        if valid_forward:
+            # Sort by weight (lowest first)
+            valid_forward.sort(key=lambda x: x[1])
+            
+            # If only one option, take it
+            if len(valid_forward) == 1:
+                return valid_forward[0][0]
+            
+            # If multiple options, use weighted probability
+            # 70% chance for best option (usually straight/inertia), 30% split among others
+            best_option = valid_forward[0]
+            other_options = valid_forward[1:]
+            
+            if random.random() < 0.7:
+                return best_option[0]
+            else:
+                return random.choice(other_options)[0]
         
         # Solo U-turn si no hay alternativa
         if not forward_options and backward_options:

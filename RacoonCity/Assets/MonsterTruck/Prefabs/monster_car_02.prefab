@@ -287,8 +287,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AgentController
   agentID: -1
   ejeRotacion: -270
-  moveSpeed: 10
-  rotationSpeed: 10
+  moveSpeed: 2
+  rotationSpeed: 5
 --- !u!65 &6697404631300258468
 BoxCollider:
   m_ObjectHideFlags: 0

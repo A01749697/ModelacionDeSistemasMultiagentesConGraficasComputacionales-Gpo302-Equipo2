@@ -332,8 +332,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AgentController
   agentID: -1
   ejeRotacion: 0
-  moveSpeed: 10
-  rotationSpeed: 10
+  moveSpeed: 2
+  rotationSpeed: 5
 --- !u!1 &126268
 GameObject:
   m_ObjectHideFlags: 0
