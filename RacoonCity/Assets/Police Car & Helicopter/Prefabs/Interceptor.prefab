@@ -191,7 +191,7 @@ GameObject:
   - component: {fileID: 2311394}
   - component: {fileID: 9594182}
   - component: {fileID: 6485234}
-  - component: {fileID: 8440534672276840953}
+  - component: {fileID: 4808551799951750318}
   m_Layer: 0
   m_Name: Interceptor
   m_TagString: Untagged
@@ -318,7 +318,7 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 4300000, guid: 7ebd38507cc5db04181efedcf8f2b8fe, type: 3}
---- !u!114 &8440534672276840953
+--- !u!114 &4808551799951750318
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -331,6 +331,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AgentController
   agentID: -1
+  ejeRotacion: 0
   moveSpeed: 10
   rotationSpeed: 10
 --- !u!1 &126268

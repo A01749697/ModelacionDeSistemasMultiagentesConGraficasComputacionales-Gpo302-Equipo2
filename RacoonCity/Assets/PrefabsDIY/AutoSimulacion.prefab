@@ -141100,7 +141100,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8394587222912968243}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
+  m_LocalRotation: {x: 0, y: 0.7071068, z: -0, w: -0.7071068}
   m_LocalPosition: {x: 0, y: -30, z: 0}
   m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 0
@@ -141113,7 +141113,7 @@ Transform:
   - {fileID: 7722523548668098320}
   - {fileID: 2146499541145172267}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 270, z: 0}
 --- !u!114 &9192463812507595741
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -141127,6 +141127,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AgentController
   agentID: -1
+  ejeRotacion: -270
   moveSpeed: 10
   rotationSpeed: 10
 --- !u!65 &1165815234413939886
