@@ -8,55 +8,121 @@ MODEL_WIDTH = 24
 MODEL_HEIGHT = 24
 WS_HOST = "localhost"
 WS_PORT = 8765
+DEBUG_DIAGNOSTICS = True
 
 # Instanciamos el modelo de la ciudad
 model = CityModel(width=MODEL_WIDTH, height=MODEL_HEIGHT)
 connected = set()
 
+def analyze_agents(agents_data):
+    """Analiza y loguea estadísticas y anomalías de los agentes."""
+    if not DEBUG_DIAGNOSTICS:
+        return 0
+
+    counts = {
+        "Car": 0, "PoliceCar": 0, "ChaoticCar": 0, 
+        "TrafficLight": 0, "Destination": 0, "Obstacle": 0
+    }
+    
+    states = {
+        "Car": {}, "ChaoticCar": {}, "PoliceCar": {}
+    }
+    
+    min_x, max_x = MODEL_WIDTH, -1
+    min_y, max_y = MODEL_HEIGHT, -1
+    border_agents = 0
+    anomalies = 0
+    
+    # Valid States Definition
+    VALID_STATES = {
+        "Car": {"DRIVING", "WANDERING", "PARKED", "CRASHED", None},
+        "ChaoticCar": {"CHAOS", "ESCAPING", "ARRESTED", None},
+        "PoliceCar": {"PATROL", "CHASE", "ARRESTING", "COOLDOWN", None},
+        "TrafficLight": {"Green", "Yellow", "Red"},
+        "Destination": {"Free", "Reserved", "Occupied", None},
+    }
+
+    cell_counts = {}
+
+    for agent in agents_data:
+        a_type = agent["agent_type"]
+        state = agent.get("state") # Use .get() to avoid KeyError if state is missing
+        x, y = agent["x"], agent["y"]
+        
+        # 1. Counts
+        if a_type in counts:
+            counts[a_type] += 1
+        else:
+            print(f"⚠️ ANOMALÍA: agent_type desconocido: {a_type} para ID={agent['id']}")
+            anomalies += 1
+            
+        # 2. State Distributions
+        if a_type in states:
+            if state not in states[a_type]:
+                states[a_type][state] = 0
+            states[a_type][state] += 1
+            
+        # 3. Spatial Stats
+        min_x = min(min_x, x)
+        max_x = max(max_x, x)
+        min_y = min(min_y, y)
+        max_y = max(max_y, y)
+        
+        if x == 0 or x == MODEL_WIDTH - 1 or y == 0 or y == MODEL_HEIGHT - 1:
+            border_agents += 1
+            
+        # 4. Anomalies
+        # Out of bounds
+        if not (0 <= x < MODEL_WIDTH and 0 <= y < MODEL_HEIGHT):
+            print(f"⚠️ ANOMALÍA: Agent ID={agent['id']} tipo={a_type} fuera de rango en pos=({x},{y})")
+            anomalies += 1
+            
+        # Invalid State
+        if a_type in VALID_STATES:
+            if state not in VALID_STATES[a_type]:
+                print(f"⚠️ ANOMALÍA: Estado inesperado state={state} para tipo={a_type} (ID={agent['id']})")
+                anomalies += 1
+        
+        # High Density
+        pos = (x, y)
+        cell_counts[pos] = cell_counts.get(pos, 0) + 1
+        if cell_counts[pos] > 4:
+             print(f"⚠️ ANOMALÍA: Alta densidad en celda ({x},{y}): {cell_counts[pos]} agentes")
+             anomalies += 1
+
+    # Logic Anomaly: Chaotic active but no Police
+    if counts["ChaoticCar"] > 0 and counts["PoliceCar"] == 0:
+        print("⚠️ ANOMALÍA: Hay caóticos activos pero ningún PoliceCar presente.")
+        anomalies += 1
+
+    # --- PRINT REPORT ---
+    print(f"\n--- STEP REPORT ---")
+    print(f"🧮 Stats -> Cars: {counts['Car']} | Police: {counts['PoliceCar']} | Chaotic: {counts['ChaoticCar']} | TL: {counts['TrafficLight']} | Dest: {counts['Destination']} | Obst: {counts['Obstacle']}")
+    
+    # Format States
+    def fmt_states(d): return ", ".join([f"{k}: {v}" for k, v in d.items()])
+    
+    print(f"🎭 Estados Car -> {fmt_states(states['Car'])}")
+    print(f"😈 Estados Chaotic -> {fmt_states(states['ChaoticCar'])}")
+    print(f"🚓 Estados Police -> {fmt_states(states['PoliceCar'])}")
+    print(f"🧭 Bounds -> x:[{min_x},{max_x}], y:[{min_y},{max_y}], Bordes ocupados: {border_agents}")
+    
+    if anomalies == 0:
+        print("✅ Diagnostics OK (0 anomalías)")
+    else:
+        print(f"⚠️ Diagnostics: {anomalies} anomalías detectadas este step (ver líneas anteriores)")
+        
+    return anomalies
 
 async def broadcast_state():
-    """Envía el estado actual del modelo a todos los clientes conectados.
-    
-    Formato del mensaje:
-    {
-        "type": "update",
-        "agents": [
-            {
-                "id": 1,
-                "x": 5,
-                "y": 10,
-                "agent_type": "Car" | "TrafficLight" | "Obstacle" | "Destination",
-                "state": "Green" | "Yellow" | "Red" (para semáforos) | "Moving" (coches) | null,
-                "direction": "NS" | "EW" (solo semáforos) | null
-            },
-            ...
-        ]
-    }
-    """
+    """Envía el estado actual del modelo a todos los clientes conectados."""
     if not connected:
         return
         
     agents_data = model.serialize_grid()
     
-    # [DIAGNÓSTICO] Interceptar y analizar datos antes de enviar
-    police_info = []
-    chaotic_info = []
-    
-    for agent in agents_data:
-        a_type = agent["agent_type"]
-        pos_str = f"{agent['id']}:({agent['x']},{agent['y']})"
-        
-        if a_type == "PoliceCar":
-            police_info.append(pos_str)
-        elif a_type == "ChaoticCar":
-            chaotic_info.append(pos_str)
-    
-    # Imprimir reporte detallado
-    print(f"\n--- STEP REPORT ---")
-    print(f"📊 Total Agentes: {len(agents_data)}")
-    print(f"🚓 Policías ({len(police_info)}): {', '.join(police_info) if police_info else 'NINGUNO'}")
-    print(f"😈 Caóticos ({len(chaotic_info)}): {', '.join(chaotic_info) if chaotic_info else 'NINGUNO'}")
-    print(f"-------------------")
+    # [DIAGNÓSTICO]
+    analyze_agents(agents_data)
     
     world_state = {
         "type": "update", 
@@ -66,16 +132,9 @@ async def broadcast_state():
     
     # Enviar a todos los clientes conectados
     await asyncio.gather(*[ws.send(msg) for ws in connected])
-    # print(f"➡️ Estado enviado a Unity: {len(agents_data)} agentes")
-
 
 async def process_message(message: str):
-    """Procesa mensajes JSON desde Unity.
-    
-    Simulación paso a paso controlada por el cliente:
-    - Unity envía {'type': 'step'} para avanzar la simulación
-    - El servidor ejecuta model.step() y responde automáticamente con el estado actualizado
-    """
+    """Procesa mensajes JSON desde Unity."""
     try:
         data = json.loads(message)
     except Exception as e:
@@ -87,24 +146,11 @@ async def process_message(message: str):
     if msg_type == "step":
         # Ejecutar un paso de la simulación
         model.step()
-        
-        # [MEJORA] Log detallado por tipo (comentado, usamos STEP REPORT)
-        # police = [a for a in model.schedule.agents if type(a).__name__ == 'PoliceCar']
-        # chaotic = [a for a in model.schedule.agents if type(a).__name__ == 'ChaoticCar']
-        # cars = [a for a in model.schedule.agents if type(a).__name__ == 'Car']
-        # print(f"✅ Step. Stats -> 🚓 Policías: {len(police)} | 😈 Caos: {len(chaotic)} | 🚙 Civiles: {len(cars)}")
     else:
         print(f"⚠️ Tipo de mensaje desconocido: {msg_type}")
 
-
 async def handler(ws):
-    """Maneja la conexión de un cliente (Unity).
-    
-    Flujo de simulación paso a paso:
-    1. Unity se conecta → Se envía estado inicial
-    2. Unity envía {'type': 'step'} → model.step() se ejecuta → Estado actualizado se envía
-    3. Unity recibe {'type': 'update', 'agents': [...]} con todos los agentes y sus estados
-    """
+    """Maneja la conexión de un cliente (Unity)."""
     # print("🎮 Unity conectado")
     connected.add(ws)
     try:
@@ -123,7 +169,6 @@ async def handler(ws):
     finally:
         connected.remove(ws)
 
-
 async def main():
     async with websockets.serve(handler, WS_HOST, WS_PORT):
         print(f"🚀 Servidor Mesa corriendo en ws://{WS_HOST}:{WS_PORT}")
@@ -132,7 +177,6 @@ async def main():
         print(f"🎯 Destinos: {len(model.destinations)}")
         print("⏳ Esperando conexión de Unity...")
         await asyncio.Future()  # run forever
-
 
 if __name__ == "__main__":
     try:
