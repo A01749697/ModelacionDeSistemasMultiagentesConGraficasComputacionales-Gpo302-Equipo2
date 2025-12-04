@@ -141084,6 +141084,7 @@ GameObject:
   m_Component:
   - component: {fileID: 254488374203749380}
   - component: {fileID: 9192463812507595741}
+  - component: {fileID: 1165815234413939886}
   m_Layer: 0
   m_Name: AutoSimulacion
   m_TagString: Untagged
@@ -141127,6 +141128,28 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AgentController
   agentID: -1
   moveSpeed: 10
+  rotationSpeed: 10
+--- !u!65 &1165815234413939886
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8394587222912968243}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 3.5239313, y: 1, z: 1.537143}
+  m_Center: {x: 0.09427711, y: 0, z: -0.10059353}
 --- !u!1 &8651421401853132639
 GameObject:
   m_ObjectHideFlags: 0

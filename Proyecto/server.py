@@ -37,6 +37,27 @@ async def broadcast_state():
         return
         
     agents_data = model.serialize_grid()
+    
+    # [DIAGNÓSTICO] Interceptar y analizar datos antes de enviar
+    police_info = []
+    chaotic_info = []
+    
+    for agent in agents_data:
+        a_type = agent["agent_type"]
+        pos_str = f"{agent['id']}:({agent['x']},{agent['y']})"
+        
+        if a_type == "PoliceCar":
+            police_info.append(pos_str)
+        elif a_type == "ChaoticCar":
+            chaotic_info.append(pos_str)
+    
+    # Imprimir reporte detallado
+    print(f"\n--- STEP REPORT ---")
+    print(f"📊 Total Agentes: {len(agents_data)}")
+    print(f"🚓 Policías ({len(police_info)}): {', '.join(police_info) if police_info else 'NINGUNO'}")
+    print(f"😈 Caóticos ({len(chaotic_info)}): {', '.join(chaotic_info) if chaotic_info else 'NINGUNO'}")
+    print(f"-------------------")
+    
     world_state = {
         "type": "update", 
         "agents": agents_data
@@ -44,9 +65,8 @@ async def broadcast_state():
     msg = json.dumps(world_state)
     
     # Enviar a todos los clientes conectados
-    # websockets 10+ maneja el broadcast de forma eficiente
     await asyncio.gather(*[ws.send(msg) for ws in connected])
-    print(f"➡️ Estado enviado a Unity: {len(agents_data)} agentes")
+    # print(f"➡️ Estado enviado a Unity: {len(agents_data)} agentes")
 
 
 async def process_message(message: str):
@@ -68,12 +88,11 @@ async def process_message(message: str):
         # Ejecutar un paso de la simulación
         model.step()
         
-        # [MEJORA] Log detallado por tipo
-        police = [a for a in model.schedule.agents if type(a).__name__ == 'PoliceCar']
-        chaotic = [a for a in model.schedule.agents if type(a).__name__ == 'ChaoticCar']
-        cars = [a for a in model.schedule.agents if type(a).__name__ == 'Car']
-        
-        print(f"✅ Step. Stats -> 🚓 Policías: {len(police)} | 😈 Caos: {len(chaotic)} | 🚙 Civiles: {len(cars)}")
+        # [MEJORA] Log detallado por tipo (comentado, usamos STEP REPORT)
+        # police = [a for a in model.schedule.agents if type(a).__name__ == 'PoliceCar']
+        # chaotic = [a for a in model.schedule.agents if type(a).__name__ == 'ChaoticCar']
+        # cars = [a for a in model.schedule.agents if type(a).__name__ == 'Car']
+        # print(f"✅ Step. Stats -> 🚓 Policías: {len(police)} | 😈 Caos: {len(chaotic)} | 🚙 Civiles: {len(cars)}")
     else:
         print(f"⚠️ Tipo de mensaje desconocido: {msg_type}")
 
@@ -86,11 +105,11 @@ async def handler(ws):
     2. Unity envía {'type': 'step'} → model.step() se ejecuta → Estado actualizado se envía
     3. Unity recibe {'type': 'update', 'agents': [...]} con todos los agentes y sus estados
     """
-    print("🎮 Unity conectado")
+    # print("🎮 Unity conectado")
     connected.add(ws)
     try:
         # Enviar estado inicial al conectar
-        print("📤 Enviando estado inicial...")
+        # print("📤 Enviando estado inicial...")
         await broadcast_state()
         
         # Procesar mensajes de Unity
@@ -100,7 +119,7 @@ async def handler(ws):
             await broadcast_state()
             
     except websockets.ConnectionClosed:
-        print("🔌 Unity desconectado")
+        pass  # print("🔌 Unity desconectado")
     finally:
         connected.remove(ws)
 
