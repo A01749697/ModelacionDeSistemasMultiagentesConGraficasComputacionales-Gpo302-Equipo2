@@ -421,6 +421,7 @@ class ChaoticCar(Car):
         if pos not in self.model.G:
             return False
         
+        # [CRITICAL] Respetar física del grafo (evitar saltos ilegales/contraflujo)
         if not self.model.G.has_edge(self.pos, pos):
             return False
         

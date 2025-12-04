@@ -52,21 +52,21 @@ from agents import Car, TrafficLight, Obstacle, Destination, ChaoticCar, PoliceC
 class CityModel(Model):
     """Modelo de ciudad con tráfico urbano multiagente."""
 
-    def __init__(self, width=24, height=24, num_cars=10, parking_time=3, num_police=5, num_chaotic=2):
+    def __init__(self, width=24, height=24, num_cars=14, parking_time=3, num_police=5, num_chaotic=10):
         super().__init__()
         self.width = width
         self.height = height
         self.num_cars = num_cars
-        self.num_police = num_police  # MÁXIMO 5 (no más)
-        self.num_chaotic = num_chaotic  # Spawn inicial, luego dinámico
+        self.num_police = num_police  
+        self.num_chaotic = num_chaotic  
         self.parking_time = parking_time
         self.spawn_timer = 0
-        self.spawn_interval = 10  # [FIX] Intervalo entre spawns (era typo: spaw_interval)
+        self.spawn_interval = 10  
         
         # Limitar a 5 PCs estrictamente
         self.num_police = min(self.num_police, 5)
         
-        # [FINITE POOL] Contador para limitar spawns totales de ChaoticCar
+        # Contador para limitar spawns totales de ChaoticCar
         self.chaotic_spawned_count = 0
         self.max_chaotic_total = self.num_chaotic  # Total permitido en toda la sesión
         
@@ -270,6 +270,13 @@ class CityModel(Model):
                     if cell in direction_deltas:
                         my_dir = direction_deltas[cell]
                         
+                        # [NUEVO] Validación de Contraflujo: Prohibir conexión si direcciones son opuestas
+                        if neighbor_cell in direction_deltas:
+                            n_dir = direction_deltas[neighbor_cell]
+                            # Si son direcciones opuestas (ej. ^ y v), NO conectar
+                            if (my_dir[0] == -n_dir[0]) and (my_dir[1] == -n_dir[1]):
+                                continue
+                        
                         if (dx, dy) == my_dir:
                             can_connect = True
                             weight = 1
@@ -371,7 +378,7 @@ class CityModel(Model):
         
         if start_pos is None:
             # [FIX] Puntos de spawn fijos en esquinas seguras (calles válidas)
-            spawn_candidates = [(1, 1), (22, 1), (1, 22), (22, 22)]
+            spawn_candidates = [(1, 1), (1, 22), (22, 1), (22, 22)]
             random.shuffle(spawn_candidates)
             
             start_pos = None
@@ -386,13 +393,13 @@ class CityModel(Model):
                 if city_map[map_row][map_col] == '#':
                     continue  # Punto inválido, probar siguiente
                 
-                # 2. Validación de Proximidad Policial: No policías a distancia < 4
+                # 2. Validación de Proximidad Policial: No policías a distancia < 2
                 too_close_to_police = False
                 for agent in self.schedule.agents:
                     if isinstance(agent, PoliceCar):
                         police_x, police_y = agent.pos
                         manhattan_dist = abs(x - police_x) + abs(y - police_y)
-                        if manhattan_dist < 4:
+                        if manhattan_dist < 2:  # [CRITICAL] Radio reducido de 4 a < 2
                             too_close_to_police = True
                             break
                 
