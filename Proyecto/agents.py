@@ -581,6 +581,7 @@ class ChaoticCar(Car):
                 # Desaparecer del modelo
                 self.model.grid.remove_agent(self)
                 self.model.schedule.remove(self)
+                return  # [FIX] Prevenir ejecución post-eliminación
             return
         
         # --- DETECTAR POLICÍA ---

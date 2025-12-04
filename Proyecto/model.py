@@ -66,6 +66,10 @@ class CityModel(Model):
         # Limitar a 5 PCs estrictamente
         self.num_police = min(self.num_police, 5)
         
+        # [FINITE POOL] Contador para limitar spawns totales de ChaoticCar
+        self.chaotic_spawned_count = 0
+        self.max_chaotic_total = self.num_chaotic  # Total permitido en toda la sesión
+        
         # Scheduler y Grid
         self.schedule = RandomActivation(self)
         self.grid = MultiGrid(width, height, torus=False)
@@ -361,20 +365,49 @@ class CityModel(Model):
 
     def spawn_chaotic_from_tunnel(self, start_pos=None):
         """Spawnea un ChaoticCar con dispersión para evitar arresto inmediato."""
-        if start_pos is None:
-            # [FIX] Intentar spawnear en un radio alrededor del túnel o aleatorio si está bloqueado
-            tunnel_area = [(22, 22), (22, 21), (21, 22), (21, 21)]
-            random.shuffle(tunnel_area)
-            
-            start_pos = tunnel_area[0]  # Default
-            
-            # Buscar una celda libre en el área del túnel (sin policías cerca)
-            for pos in tunnel_area:
-                cell_contents = self.grid.get_cell_list_contents([pos])
-                if not any(isinstance(a, PoliceCar) for a in cell_contents):
-                    start_pos = pos
-                    break
+        # [FINITE POOL] Verificar límite total antes de intentar spawn
+        if self.chaotic_spawned_count >= self.max_chaotic_total:
+            return None
         
+        if start_pos is None:
+            # [FIX] Puntos de spawn fijos en esquinas seguras (calles válidas)
+            spawn_candidates = [(1, 1), (22, 1), (1, 22), (22, 22)]
+            random.shuffle(spawn_candidates)
+            
+            start_pos = None
+            
+            # Intentar validar los 4 puntos antes de rendirse
+            for pos in spawn_candidates:
+                x, y = pos
+                
+                # 1. Validación de Terreno: No debe ser edificio (#)
+                map_row = 23 - y
+                map_col = x
+                if city_map[map_row][map_col] == '#':
+                    continue  # Punto inválido, probar siguiente
+                
+                # 2. Validación de Proximidad Policial: No policías a distancia < 4
+                too_close_to_police = False
+                for agent in self.schedule.agents:
+                    if isinstance(agent, PoliceCar):
+                        police_x, police_y = agent.pos
+                        manhattan_dist = abs(x - police_x) + abs(y - police_y)
+                        if manhattan_dist < 4:
+                            too_close_to_police = True
+                            break
+                
+                if too_close_to_police:
+                    continue  # Punto bloqueado por policía, probar siguiente
+                
+                # Punto válido encontrado
+                start_pos = pos
+                break
+            
+            # Si los 4 puntos están bloqueados, abortar spawn en este step
+            if start_pos is None:
+                return None
+        
+        # Crear y spawnear el ChaoticCar
         chaotic_car = ChaoticCar(
             self.next_id(),
             self,
@@ -384,6 +417,10 @@ class CityModel(Model):
         
         self.grid.place_agent(chaotic_car, start_pos)
         self.schedule.add(chaotic_car)
+        
+        # [FINITE POOL] Incrementar contador de spawns totales
+        self.chaotic_spawned_count += 1
+        
         return chaotic_car
 
     def spawn_car(self, start_pos=None, agent_type=Car):
@@ -427,7 +464,7 @@ class CityModel(Model):
             if current_police < self.num_police:
                 patrol_id = current_police % 5
                 self.spawn_police(patrol_id=patrol_id)
-            elif current_chaotic < self.num_chaotic:
+            elif self.chaotic_spawned_count < self.max_chaotic_total:  # [FINITE POOL] Verificar total spawneado
                 self.spawn_chaotic_from_tunnel()
             elif current_cars < self.num_cars:
                 self.spawn_car(agent_type=Car)
