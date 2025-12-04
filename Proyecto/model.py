@@ -277,7 +277,10 @@ class CityModel(Model):
                         # REGLA 3: Cambio de Carril (Lateral)
                         # Solo si ambos carriles van EXACTAMENTE a la misma dirección
                         elif n_dir == my_dir:
-                            self.G.add_edge((x, y), (nx_x, nx_y), weight=3) # Costo mayor
+                            # FIX: Validar adyacencia física estricta (Manhattan distance == 1)
+                            manhattan_dist = abs(dx) + abs(dy)
+                            if manhattan_dist == 1:
+                                self.G.add_edge((x, y), (nx_x, nx_y), weight=3) # Costo mayor
                             count_lane_change += 1
                             
                     # CASO B: Hacia Intersección o Destino (S, D)

@@ -8,20 +8,27 @@ from collections import deque
 
 def detect_stuck_pattern(car):
     """Detecta si coche está atorado basado en historial."""
-    if len(car.position_history) < 3:
+    if len(car.position_history) < 5:
         return False, "InsufficientData"
     
-    recent_pos = list(car.position_history)[-3:]
+    recent_pos = list(car.position_history)[-5:]
     
-    # Patrón 1: Mismo lugar 3 steps consecutivos
-    if recent_pos[0] == recent_pos[1] == recent_pos[2]:
+    # Patrón 1: Mismo lugar 3 steps consecutivos (A-A-A)
+    if recent_pos[-1] == recent_pos[-2] == recent_pos[-3]:
         return True, "STATIC_BLOCK"
     
-    # Patrón 2: Ping-Pong (A → B → A)
-    if recent_pos[0] == recent_pos[2] and recent_pos[0] != recent_pos[1]:
-        return True, "PING_PONG"
+    # Patrón 2: Ping-Pong Corto (A → B → A)
+    if recent_pos[-1] == recent_pos[-3] and recent_pos[-1] != recent_pos[-2]:
+        return True, "PING_PONG_SHORT"
+
+    # Patrón 3: Ping-Pong Largo (A-B-A-B-A)
+    # A=0, B=1, A=2, B=3, A=4
+    if (recent_pos[0] == recent_pos[2] == recent_pos[4] and 
+        recent_pos[1] == recent_pos[3] and 
+        recent_pos[0] != recent_pos[1]):
+        return True, "PING_PONG_LONG"
     
-    # Patrón 3: Stuck_counter alto
+    # Patrón 4: Stuck_counter alto
     if car.stuck_counter > 5:
         return True, "HIGH_STUCK_COUNTER"
     
@@ -413,7 +420,7 @@ class ChaoticCar(Car):
         # --- NUEVOS ATRIBUTOS FASE 1 ---
         self.is_being_chased = False  # Flag: ¿hay policía cerca?
         self.chase_memory_timer = 0   # Cuenta regresiva de "memoria" (5 seg = 50 steps)
-        self.chase_memory_max = 50    # 5 segundos (aproximado a 10 steps/seg)
+        self.chase_memory_max = 25    # 5 segundos (aproximado a 10 steps/seg)
         self.arrest_timer = 0         # Cuando es arrestado, espera 5 steps
         self.arrest_duration = 5      # 5 steps para desaparecer
         self.debug = True # Force debug for ChaoticCar in this file
@@ -454,51 +461,58 @@ class ChaoticCar(Car):
 
     def get_escape_move(self, police_pos):
         """
-        Elige el movimiento que maximice la distancia Manhattan al policía.
-        MEJORAS:
-        - Urban Diving: Penaliza celdas del perímetro para fomentar rutas internas
-        - Inertia: 90% probabilidad de continuar en la misma dirección si es óptima
+        Evasión priorizada: Inercia > Distancia > Penalización Reversa.
         """
         neighbors = self.model.grid.get_neighborhood(
             self.pos, moore=False, include_center=False
         )
         
         valid_moves = []
+        backward_pos = None
+        
+        # Identificar posición trasera (para penalizar)
+        if self.last_move:
+            backward_pos = (self.pos[0] - self.last_move[0], self.pos[1] - self.last_move[1])
+
         for n in neighbors:
             if self.can_move_to(n):
-                # Calcular distancia al policía si me muevo a n
-                dist = abs(n[0] - police_pos[0]) + abs(n[1] - police_pos[1])
+                # B) Score base: Distancia Manhattan al policía
+                score = abs(n[0] - police_pos[0]) + abs(n[1] - police_pos[1])
                 
-                # URBAN DIVING: Penalizar si 'n' está en el borde del mapa
+                # C) PENALIZACIÓN REVERSA
+                if n == backward_pos:
+                    score -= 10
+                
+                # Urban Diving (existente)
                 if n[0] <= 1 or n[0] >= 22 or n[1] <= 1 or n[1] >= 22:
-                    dist -= 2  # Hacemos que esta opción sea menos atractiva
+                    score -= 2
                 
-                valid_moves.append((n, dist))
+                valid_moves.append((n, score))
         
-        if self.debug:
-            print(f"[CHAOTIC {self.unique_id}] Escape options: {valid_moves}")
-
         if not valid_moves:
             return None
-        
-        # Maximizar distancia
-        valid_moves.sort(key=lambda x: x[1], reverse=True)
-        
-        # Tomar el mejor (o uno de los mejores si hay empate)
-        best_dist = valid_moves[0][1]
-        best_moves = [pos for pos, dist in valid_moves if dist == best_dist]
-        
-        # INERCIA: Priorizar last_move con 90% probabilidad si está en los mejores
-        final_move = random.choice(best_moves)  # Elección por defecto
+            
+        # D) INERCIA (Critical)
         if self.last_move:
-            ideal_pos_with_inertia = (self.pos[0] + self.last_move[0], self.pos[1] + self.last_move[1])
-            if ideal_pos_with_inertia in best_moves and random.random() < 0.9:
-                final_move = ideal_pos_with_inertia
+            forward_pos = (self.pos[0] + self.last_move[0], self.pos[1] + self.last_move[1])
+            # Buscar si forward_pos es válido
+            for move, score in valid_moves:
+                if move == forward_pos:
+                    # 80% probabilidad de mantener inercia si es válido
+                    if random.random() < 0.8:
+                        if self.debug:
+                            print(f"[CHAOTIC {self.unique_id}] INERTIA ESCAPE to {forward_pos}")
+                        return forward_pos
+                    break
 
-        if self.debug:
-            print(f"[CHAOTIC {self.unique_id}] Chose {final_move} (Dist: {best_dist})")
+        # E) Fallback: Mejor score
+        valid_moves.sort(key=lambda x: x[1], reverse=True)
+        best_move = valid_moves[0][0]
         
-        return final_move
+        if self.debug:
+            print(f"[CHAOTIC {self.unique_id}] Escape options: {valid_moves}. Chose {best_move}")
+            
+        return best_move
 
     def get_chaotic_move(self):
         """
@@ -569,6 +583,25 @@ class ChaoticCar(Car):
         Máquina de estados para ChaoticCar.
         CHAOS → ESCAPING → (back to CHAOS) | ARRESTED
         """
+        # 1. ESTADO ARRESTED - manejar y salir LO PRIMERO
+        if self.state == "ARRESTED":
+            self.arrest_timer -= 1
+            if self.arrest_timer <= 0:
+                # Avisar a policías que me perseguían
+                for agent in self.model.schedule.agents:
+                    if isinstance(agent, PoliceCar) and agent.chase_target == self:
+                        agent.chase_target = None
+                        agent.last_known_pos = None
+                        agent.state = "PATROL"
+                
+                if self.debug:
+                    print(f"[CHAOTIC {self.unique_id}] DESPAWN at {self.pos} (ARRESTED done)")
+                
+                # Desaparecer del modelo
+                self.model.grid.remove_agent(self)
+                self.model.schedule.remove(self)
+            return  # Nada más si estoy arrestado
+
         self.position_history.append(self.pos)
         
         # Actualizar stuck counter
@@ -579,27 +612,38 @@ class ChaoticCar(Car):
             else:
                 self.stuck_counter = 0
         
+        # --- ANTI-STUCK MECHANISM ---
+        is_stuck, reason = detect_stuck_pattern(self)
+        if is_stuck:
+            if self.debug:
+                print(f"[CHAOTIC {self.unique_id}] STUCK DETECTED ({reason})! Forcing random move.")
+            
+            # Forzar movimiento aleatorio válido (preferiblemente no reversa)
+            neighbors = self.model.grid.get_neighborhood(
+                self.pos, moore=False, include_center=False
+            )
+            valid = [n for n in neighbors if self.can_move_to(n)]
+            
+            if valid:
+                # Intentar evitar reversa si es posible
+                backward_pos = None
+                if self.last_move:
+                    backward_pos = (self.pos[0] - self.last_move[0], self.pos[1] - self.last_move[1])
+                
+                non_reverse = [n for n in valid if n != backward_pos]
+                
+                next_pos = random.choice(non_reverse) if non_reverse else random.choice(valid)
+                
+                # Ejecutar movimiento forzado
+                dx = next_pos[0] - self.pos[0]
+                dy = next_pos[1] - self.pos[1]
+                self.last_move = (dx, dy)
+                self.model.grid.move_agent(self, next_pos)
+                return # Saltar resto del step
+        
         # NUNCA buscar destino (override)
         self.destination = None
         self.path = []
-        
-        # --- ESTADO ARRESTED ---
-        if self.state == "ARRESTED":
-            self.arrest_timer -= 1
-            if self.arrest_timer <= 0:
-                # CLEANUP FIX: Notificar a policías que me persiguen
-                for agent in self.model.schedule.agents:
-                    if isinstance(agent, PoliceCar):
-                        if agent.chase_target == self:
-                            agent.chase_target = None
-                            agent.last_known_pos = None
-                            agent.state = "PATROL"
-                
-                # Desaparecer del modelo
-                self.model.grid.remove_agent(self)
-                self.model.schedule.remove(self)
-                return  # [FIX] Prevenir ejecución post-eliminación
-            return
         
         # --- DETECTAR POLICÍA ---
         has_police, police_pos = self.detect_police_in_range()
@@ -811,10 +855,42 @@ class PoliceCar(Car):
         
         # --- ESTADO CHASE ---
         if self.state == "CHASE":
-            # ANTI-INFINITE-LOOP: Si policía y criminal están en la MISMA celda
-            manhattan_dist_check = abs(self.chase_target.pos[0] - self.pos[0]) + abs(self.chase_target.pos[1] - self.pos[1]) if self.chase_target else 999
+            # --- EARLY EXIT: Saneo del target ---
+            # a) Si no hay target, volver a PATROL
+            if self.chase_target is None or self.chase_target not in self.model.schedule.agents:
+                self.state = "PATROL"
+                self.chase_target = None
+                self.last_known_pos = None
+                return
+
+            # b) Si el target ya está arrestado, volver a PATROL
+            if getattr(self.chase_target, "state", None) == "ARRESTED":
+                self.state = "PATROL"
+                self.chase_target = None
+                self.last_known_pos = None
+                return
+
+            # c) Si ya estoy en la celda objetivo pero aquí no hay ningún ChaoticCar activo
+            target_pos = self.chase_target.pos
+            self.last_known_pos = target_pos
             
-            if manhattan_dist_check == 0 and self.chase_target and self.chase_target.state != "ARRESTED":
+            if self.pos == target_pos:
+                cell_contents = self.model.grid.get_cell_list_contents([self.pos])
+                chaotic_here = any(
+                    isinstance(a, ChaoticCar) and getattr(a, "state", None) != "ARRESTED"
+                    for a in cell_contents
+                )
+                if not chaotic_here:
+                    # Perseguía un "fantasma": reset a PATROL
+                    self.state = "PATROL"
+                    self.chase_target = None
+                    self.last_known_pos = None
+                    return
+
+            # ANTI-INFINITE-LOOP: Si policía y criminal están en la MISMA celda
+            manhattan_dist_check = abs(self.chase_target.pos[0] - self.pos[0]) + abs(self.chase_target.pos[1] - self.pos[1])
+            
+            if manhattan_dist_check == 0 and self.chase_target.state != "ARRESTED":
                 # ¡Están encima! Ejecutar arresto automático
                 self.state = "ARRESTING"
                 self.arrest_timer = self.arrest_duration
@@ -875,12 +951,12 @@ class PoliceCar(Car):
                         path = nx.shortest_path(self.model.G, self.pos, target_pos)
                         path_length = len(path) - 1  # Número de pasos
                         
-                        # CONDICIÓN DE BARRERA: Cerca en línea recta pero lejos en grafo
-                        if manhattan_dist < 4 and path_length > 15:
-                            if self.debug:
-                                print(f"[POLICE {self.unique_id}] FORMING BARRIER! Visual Dist: {manhattan_dist}, Graph Path: {path_length}. Holding position.")
-                            # Mantenerse en posición (no moverse)
-                            continue  # Saltar al siguiente turbo_iteration o salir del loop
+                        # CONDICIÓN DE BARRERA: ELIMINADA para evitar deadlocks
+                        # if manhattan_dist < 4 and path_length > 15:
+                        #     if self.debug:
+                        #         print(f"[POLICE {self.unique_id}] FORMING BARRIER! Visual Dist: {manhattan_dist}, Graph Path: {path_length}. Holding position.")
+                        #     # Mantenerse en posición (no moverse)
+                        #     continue  # Saltar al siguiente turbo_iteration o salir del loop
 
                         if self.debug:
                             print(f"[POLICE {self.unique_id}] Chasing target at {target_pos}. My Pos: {self.pos}")
