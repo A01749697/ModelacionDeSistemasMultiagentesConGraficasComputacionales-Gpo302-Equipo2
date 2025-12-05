@@ -107,9 +107,9 @@ server = ModularServer(
     {
         "width": width, 
         "height": height,
-        "num_cars": Slider("Number of Cars", 13, 1, 30, 1),
+        "num_cars": Slider("Number of Cars", 13, 1, 100, 1),
         "num_police": Slider("Number of Police", 2, 0, 10, 1),
-        "num_chaotic": Slider("Number of Chaotic", 2, 0, 10, 1),
+        "num_chaotic": Slider("Number of Chaotic", 2, 0, 50, 1),
         "parking_time": Slider("Parking Time", 3, 1, 20, 1)
     }
 )

@@ -52,7 +52,7 @@ from agents import Car, TrafficLight, Obstacle, Destination, ChaoticCar, PoliceC
 class CityModel(Model):
     """Modelo de ciudad con tráfico urbano multiagente."""
 
-    def __init__(self, width=24, height=24, num_cars=20, parking_time=3, num_police=5, num_chaotic=10):
+    def __init__(self, width=24, height=24, num_cars=80, parking_time=5, num_police=5, num_chaotic=20):
         super().__init__()
         self.width = width
         self.height = height
